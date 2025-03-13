@@ -10,48 +10,16 @@ import { useRouter } from "next/navigation";
 const MOCK_COMMUNITIES = [
   {
     id: "1",
-    name: "DeFi Innovators",
-    description: "A community focused on decentralized finance innovations and strategies.",
-    members: 1243,
+    name: "#culés",
+    description: "A group of passionate FC Barcelona fans.",
+    members: "92/100",
     image: "https://images.unsplash.com/photo-1639762681057-408e52192e55?q=80&w=2832&auto=format&fit=crop",
-    tags: ["DeFi", "Finance", "Yield Farming"]
+    tags: ["Soccer", "Sports"]
   },
-  {
-    id: "2",
-    name: "NFT Creators",
-    description: "Connect with artists and collectors in the NFT space.",
-    members: 892,
-    image: "https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?q=80&w=2874&auto=format&fit=crop",
-    tags: ["NFT", "Art", "Collectibles"]
-  },
-  {
-    id: "3",
-    name: "DAO Governance",
-    description: "Discuss and participate in decentralized autonomous organization governance.",
-    members: 567,
-    image: "https://images.unsplash.com/photo-1639322537228-f710d846310a?q=80&w=2832&auto=format&fit=crop",
-    tags: ["DAO", "Governance", "Voting"]
-  },
-  {
-    id: "4",
-    name: "Web3 Developers",
-    description: "A hub for blockchain and Web3 developers to collaborate on projects.",
-    members: 1876,
-    image: "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?q=80&w=2834&auto=format&fit=crop",
-    tags: ["Development", "Coding", "Web3"]
-  },
-  {
-    id: "5",
-    name: "Crypto Traders",
-    description: "Share trading strategies and market analysis with fellow traders.",
-    members: 2341,
-    image: "https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=2787&auto=format&fit=crop",
-    tags: ["Trading", "Market Analysis", "Investment"]
-  }
 ];
 
 // Mock user data
-const MOCK_USER_COMMUNITIES = ["1", "3"]; // IDs of communities the user has joined
+const MOCK_USER_COMMUNITIES: string[] = []; // IDs of communities the user has joined
 
 export default function Communities() {
   const [searchTerm, setSearchTerm] = useState("");
