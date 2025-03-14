@@ -6,6 +6,8 @@ import Link from "next/link";
 import { ConnectButton, useActiveAccount, useSendTransaction } from "thirdweb/react";
 import { client } from "../../client";
 import { getContract, prepareContractCall, defineChain } from "thirdweb";
+import { collection, addDoc } from 'firebase/firestore';
+import { db } from '../../lib/firebase';
 
 // Define Base Sepolia testnet
 const baseSepolia = defineChain({
@@ -155,31 +157,24 @@ export default function CreateCommunity() {
         createdAt: new Date().toISOString(),
       };
       
-      // Save community data to your database
-      setFormData(prev => ({ ...prev, deploymentStep: "Saving community data..." }));
+      // Save community data to Firebase
+      setFormData(prev => ({ ...prev, deploymentStep: "Saving community data to Firebase..." }));
       
-      // In a real implementation, you would use the following code:
-      /*
-      const response = await fetch('/api/communities', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(communityData),
-      });
-      
-      const data = await response.json();
-      const communityId = data.id;
-      */
-      
-      // For now, we'll simulate the database save with a timeout
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Mock community ID
-      const mockCommunityId = "1";
-      
-      console.log("Created community with contract address:", LAUNCH_MEMBERSHIP_CONTRACT_ADDRESS);
-      
-      // Redirect to the new community page
-      router.push(`/communities/${mockCommunityId}`);
+      try {
+        // Add a new document to the "communities" collection
+        const docRef = await addDoc(collection(db, "communities"), communityData);
+        console.log("Community saved with ID:", docRef.id);
+        
+        // Redirect to the new community page
+        router.push(`/communities/${docRef.id}`);
+      } catch (firestoreError) {
+        console.error("Error saving to Firestore:", firestoreError);
+        setFormData(prev => ({ 
+          ...prev, 
+          isLoading: false, 
+          error: "Failed to save community data to Firebase. Please try again." 
+        }));
+      }
       
     } catch (error) {
       console.error("Error creating community:", error);
@@ -404,6 +399,25 @@ export default function CreateCommunity() {
             {formData.error && (
               <div className="bg-red-50 text-red-600 p-4 rounded-lg text-sm">
                 {formData.error}
+              </div>
+            )}
+            
+            {/* Success message */}
+            {formData.deploymentStep === "Club successfully created!" && (
+              <div className="bg-green-50 text-green-600 p-4 rounded-lg text-sm mb-4">
+                <div className="flex items-center gap-2">
+                  <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  </svg>
+                  <span>Club successfully created! You can view it on the <a 
+                    href={`https://sepolia-explorer.base.org/address/${LAUNCH_MEMBERSHIP_CONTRACT_ADDRESS}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline"
+                  >
+                    block explorer
+                  </a>.</span>
+                </div>
               </div>
             )}
             
