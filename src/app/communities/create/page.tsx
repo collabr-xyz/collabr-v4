@@ -3,10 +3,38 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ConnectButton, useActiveAccount } from "thirdweb/react";
+import { ConnectButton, useActiveAccount, useSendTransaction } from "thirdweb/react";
 import { client } from "../../client";
-import { getContract } from "thirdweb";
-import { deployContract } from "thirdweb/deploys";
+import { getContract, prepareContractCall, defineChain } from "thirdweb";
+
+// Define Base Sepolia testnet
+const baseSepolia = defineChain({
+  id: 84532,
+  name: "Base Sepolia",
+  rpcUrls: {
+    default: {
+      http: ["https://sepolia.base.org"],
+    },
+    public: {
+      http: ["https://sepolia.base.org"],
+    },
+  },
+  nativeCurrency: {
+    name: "Ethereum",
+    symbol: "ETH",
+    decimals: 18,
+  },
+  blockExplorers: {
+    default: {
+      name: "BaseScan",
+      url: "https://sepolia-explorer.base.org",
+    },
+  },
+  testnet: true,
+});
+
+// Deployed LaunchMembership contract address
+const LAUNCH_MEMBERSHIP_CONTRACT_ADDRESS = "0x95019A575DC807a6153471262bec892dDdf3e61e";
 
 // Approved addresses for community creation (same as in communities page)
 const APPROVED_CREATORS = [
@@ -16,6 +44,7 @@ const APPROVED_CREATORS = [
 export default function CreateCommunity() {
   const router = useRouter();
   const activeAccount = useActiveAccount();
+  const { mutate: sendTransaction } = useSendTransaction();
   
   // Check if current user is approved to create communities
   const isApprovedCreator = activeAccount ? 
@@ -70,76 +99,84 @@ export default function CreateCommunity() {
       const nftPrice = parseFloat(formData.nftPrice);
       const tagsArray = formData.tags.split(',').map(tag => tag.trim()).filter(tag => tag);
       
-      // Deploy NFT contract using Thirdweb SDK
-      setFormData(prev => ({ ...prev, deploymentStep: "Deploying NFT contract..." }));
+      setFormData(prev => ({ ...prev, deploymentStep: "Connecting to contract..." }));
       
-      // In a real implementation, you would use the following code:
-      /*
-      // Deploy an ERC-721 NFT Collection contract
-      const contractAddress = await deployContract({
+      // Get the deployed LaunchMembership contract
+      const contract = getContract({
         client,
-        chain: client.chain,
-        contractType: "nft-collection",
-        params: {
-          name: formData.nftName,
-          symbol: formData.nftSymbol,
-          primary_sale_recipient: activeAccount.address,
-          fee_recipient: activeAccount.address,
-          seller_fee_basis_points: 500, // 5% royalty
-        },
-        signer: activeAccount,
+        address: LAUNCH_MEMBERSHIP_CONTRACT_ADDRESS,
+        chain: baseSepolia, // Using Base Sepolia testnet
       });
       
-      // Get the deployed contract
-      const contract = await getContract({
-        client,
-        chain: client.chain,
-        contractAddress,
+      // Create a new club by calling the contract methods
+      setFormData(prev => ({ ...prev, deploymentStep: "Updating club info..." }));
+      
+      // Update club info
+      const updateInfoTx = prepareContractCall({
+        contract,
+        method: "function updateClubInfo(string,string,string)",
+        params: [formData.name, formData.description, formData.image]
       });
       
-      // Set metadata for the NFT collection
-      await contract.metadata.set({
-        name: formData.nftName,
-        description: formData.nftDescription,
-        image: formData.image,
-        external_link: `${window.location.origin}/communities/${contractAddress}`,
+      await sendTransaction(updateInfoTx);
+      
+      // Update membership price
+      setFormData(prev => ({ ...prev, deploymentStep: "Updating membership price..." }));
+      const priceInWei = BigInt(Math.floor(nftPrice * 1e18)); // Convert ETH to wei
+      
+      const updatePriceTx = prepareContractCall({
+        contract,
+        method: "function updateMembershipPrice(uint256)",
+        params: [priceInWei]
       });
       
-      // Create community in your database with the contract address
+      await sendTransaction(updatePriceTx);
+      
+      // Update membership limit
+      setFormData(prev => ({ ...prev, deploymentStep: "Updating membership limit..." }));
+      const updateLimitTx = prepareContractCall({
+        contract,
+        method: "function updateMembershipLimit(uint256)",
+        params: [BigInt(membershipLimit)]
+      });
+      
+      await sendTransaction(updateLimitTx);
+      
+      // Create community data for your database
       const communityData = {
         name: formData.name,
         description: formData.description,
         image: formData.image,
         tags: tagsArray,
         membershipLimit,
-        nftContractAddress: contractAddress,
+        nftContractAddress: LAUNCH_MEMBERSHIP_CONTRACT_ADDRESS,
         nftPrice,
         creatorAddress: activeAccount.address,
         createdAt: new Date().toISOString(),
       };
       
       // Save community data to your database
-      // const response = await fetch('/api/communities', {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify(communityData),
-      // });
-      // 
-      // const data = await response.json();
-      // const communityId = data.id;
+      setFormData(prev => ({ ...prev, deploymentStep: "Saving community data..." }));
+      
+      // In a real implementation, you would use the following code:
+      /*
+      const response = await fetch('/api/communities', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(communityData),
+      });
+      
+      const data = await response.json();
+      const communityId = data.id;
       */
       
-      // For now, we'll simulate the deployment with a timeout
-      setFormData(prev => ({ ...prev, deploymentStep: "Creating community..." }));
+      // For now, we'll simulate the database save with a timeout
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
-      // Mock successful creation
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Mock contract address and community ID
-      const mockContractAddress = "0x" + Math.random().toString(16).substring(2, 42);
+      // Mock community ID
       const mockCommunityId = "1";
       
-      console.log("Created community with contract address:", mockContractAddress);
+      console.log("Created community with contract address:", LAUNCH_MEMBERSHIP_CONTRACT_ADDRESS);
       
       // Redirect to the new community page
       router.push(`/communities/${mockCommunityId}`);
