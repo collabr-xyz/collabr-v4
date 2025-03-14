@@ -18,6 +18,11 @@ const MOCK_COMMUNITIES = [
   },
 ];
 
+// Add approved addresses for community creation
+const APPROVED_CREATORS = [
+  "0xc1C7C9C7A22885e323250e198c5f7374c0C9c5D5", // Example address
+];
+
 // Mock user data
 const MOCK_USER_COMMUNITIES: string[] = []; // IDs of communities the user has joined
 
@@ -26,6 +31,10 @@ export default function Communities() {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const activeAccount = useActiveAccount();
   const router = useRouter();
+  
+  // Check if current user is approved to create communities
+  const isApprovedCreator = activeAccount ? 
+    APPROVED_CREATORS.includes(activeAccount.address) : false;
   
   // Extract all unique tags from communities
   const allTags = Array.from(
@@ -73,6 +82,21 @@ export default function Communities() {
             <p className="text-zinc-500 mt-1 text-sm">Find your people</p>
           </div>
           <div className="flex items-center gap-4">
+            {activeAccount && (
+              <button
+                onClick={() => isApprovedCreator ? 
+                  router.push('/communities/create') : 
+                  alert('Your wallet is not approved to create communities. Please apply for approval.')}
+                className={`px-4 py-2 rounded-lg text-sm transition-colors ${
+                  isApprovedCreator
+                    ? 'bg-[#008CFF] text-white hover:bg-[#0070CC]'
+                    : 'bg-zinc-100 text-zinc-400 cursor-not-allowed'
+                }`}
+                disabled={!isApprovedCreator}
+              >
+                Create new club
+              </button>
+            )}
             <Link href="/" className="text-sm text-zinc-500 hover:text-zinc-800 transition">
               Home
             </Link>
