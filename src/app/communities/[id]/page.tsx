@@ -60,6 +60,7 @@ export default function CommunityDetail() {
   const [error, setError] = useState<string | null>(null);
   const [purchaseStatus, setPurchaseStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
+  const [isCreator, setIsCreator] = useState(false);
   
   useEffect(() => {
     async function fetchCommunity() {
@@ -68,10 +69,17 @@ export default function CommunityDetail() {
         const docSnap = await getDoc(docRef);
         
         if (docSnap.exists()) {
-          setCommunity({
+          const communityData = {
             id: docSnap.id,
             ...docSnap.data()
-          } as Community);
+          } as Community;
+          
+          setCommunity(communityData);
+          
+          // Check if the active account is the creator
+          if (activeAccount && communityData.creatorAddress === activeAccount.address) {
+            setIsCreator(true);
+          }
         } else {
           setError("Community not found");
         }
@@ -86,7 +94,7 @@ export default function CommunityDetail() {
     if (communityId) {
       fetchCommunity();
     }
-  }, [communityId]);
+  }, [communityId, activeAccount]);
   
   const handlePurchaseMembership = async () => {
     if (!activeAccount || !community) return;
@@ -125,8 +133,60 @@ export default function CommunityDetail() {
     return (
       <main className="min-h-screen bg-white text-zinc-900">
         <div className="container mx-auto px-4 py-8 max-w-6xl">
-          <div className="flex justify-center items-center py-20">
-            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[#008CFF]"></div>
+          {/* Header skeleton */}
+          <div className="flex justify-between items-center mb-8">
+            <div>
+              <div className="w-24 h-4 bg-zinc-200 rounded mb-2 animate-pulse"></div>
+              <div className="w-64 h-8 bg-zinc-200 rounded animate-pulse"></div>
+            </div>
+            <div className="w-32 h-10 bg-zinc-200 rounded animate-pulse"></div>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            {/* Left column skeleton */}
+            <div className="md:col-span-1">
+              <div className="rounded-lg overflow-hidden border border-zinc-100">
+                <div className="w-full h-64 bg-zinc-200 animate-pulse"></div>
+              </div>
+              
+              <div className="mt-4 border border-zinc-100 rounded-lg p-4">
+                <div className="w-40 h-6 bg-zinc-200 rounded animate-pulse mb-4"></div>
+                <div className="space-y-4">
+                  {[1, 2, 3, 4].map((item) => (
+                    <div key={item} className="flex justify-between">
+                      <div className="w-24 h-4 bg-zinc-200 rounded animate-pulse"></div>
+                      <div className="w-20 h-4 bg-zinc-200 rounded animate-pulse"></div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            
+            {/* Right column skeleton */}
+            <div className="md:col-span-2">
+              <div className="border border-zinc-100 rounded-lg p-6">
+                <div className="w-32 h-6 bg-zinc-200 rounded animate-pulse mb-4"></div>
+                <div className="space-y-2">
+                  {[1, 2, 3].map((item) => (
+                    <div key={item} className="w-full h-4 bg-zinc-200 rounded animate-pulse"></div>
+                  ))}
+                </div>
+                
+                <div className="mt-6">
+                  <div className="w-24 h-5 bg-zinc-200 rounded animate-pulse mb-3"></div>
+                  <div className="flex flex-wrap gap-2">
+                    {[1, 2, 3].map((item) => (
+                      <div key={item} className="w-16 h-6 bg-zinc-200 rounded-full animate-pulse"></div>
+                    ))}
+                  </div>
+                </div>
+                
+                <div className="mt-8">
+                  <div className="w-48 h-6 bg-zinc-200 rounded animate-pulse mb-4"></div>
+                  <div className="w-full h-12 bg-zinc-200 rounded animate-pulse"></div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </main>
@@ -232,10 +292,12 @@ export default function CommunityDetail() {
               </div>
               
               <div className="mt-8">
-                <h3 className="font-medium mb-4">Join this Community</h3>
+                <h3 className="font-medium mb-4">
+                  {isCreator ? "Your Community" : "Join this Community"}
+                </h3>
                 {!activeAccount ? (
                   <div className="bg-zinc-50 p-4 rounded-lg text-center">
-                    <p className="text-zinc-600 mb-4">Connect your wallet to purchase a membership</p>
+                    <p className="text-zinc-600 mb-4">Connect your wallet to access this community</p>
                     <ConnectButton
                       client={client}
                       appMetadata={{
@@ -243,6 +305,19 @@ export default function CommunityDetail() {
                         url: "https://collabr.xyz",
                       }}
                     />
+                  </div>
+                ) : isCreator ? (
+                  <div>
+                    <Link href={`/communities/${communityId}/room`}>
+                      <button
+                        className="w-full py-3 rounded-lg text-white transition-colors bg-[#008CFF] hover:bg-[#0070CC]"
+                      >
+                        Enter Your Community
+                      </button>
+                    </Link>
+                    <div className="mt-4 bg-blue-50 text-blue-600 p-4 rounded-lg text-sm">
+                      As the creator of this community, you have full access to manage and participate.
+                    </div>
                   </div>
                 ) : (
                   <div>
@@ -263,6 +338,13 @@ export default function CommunityDetail() {
                     {purchaseStatus === 'success' && (
                       <div className="mt-4 bg-green-50 text-green-600 p-4 rounded-lg text-sm">
                         Membership purchased successfully! You are now a member of this community.
+                        <div className="mt-3">
+                          <Link href={`/communities/${communityId}/room`}>
+                            <button className="w-full py-2 rounded-lg text-white transition-colors bg-[#008CFF] hover:bg-[#0070CC]">
+                              Enter Community Room
+                            </button>
+                          </Link>
+                        </div>
                       </div>
                     )}
                     

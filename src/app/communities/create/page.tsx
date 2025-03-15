@@ -38,6 +38,9 @@ const baseSepolia = defineChain({
 // Deployed LaunchMembership contract address
 const LAUNCH_MEMBERSHIP_CONTRACT_ADDRESS = "0x95019A575DC807a6153471262bec892dDdf3e61e";
 
+// $GROW token contract address
+const GROW_TOKEN_ADDRESS = "0x2d06C90890BfE06c0538F9bf5c76d3567341a7DA"; // Replace with your actual $GROW token address
+
 // Approved addresses for community creation (same as in communities page)
 const APPROVED_CREATORS = [
   "0xc1C7C9C7A22885e323250e198c5f7374c0C9c5D5", // Example address
@@ -67,7 +70,7 @@ export default function CreateCommunity() {
     nftName: "",
     nftSymbol: "",
     nftDescription: "",
-    nftPrice: "0.01",
+    nftPrice: "100", // Default price in $GROW tokens
     isLoading: false,
     error: "",
     deploymentStep: "",
@@ -110,6 +113,13 @@ export default function CreateCommunity() {
         chain: baseSepolia, // Using Base Sepolia testnet
       });
       
+      // Get the $GROW token contract
+      const growTokenContract = getContract({
+        client,
+        address: GROW_TOKEN_ADDRESS,
+        chain: baseSepolia,
+      });
+      
       // Create a new club by calling the contract methods
       setFormData(prev => ({ ...prev, deploymentStep: "Updating club info..." }));
       
@@ -124,12 +134,12 @@ export default function CreateCommunity() {
       
       // Update membership price
       setFormData(prev => ({ ...prev, deploymentStep: "Updating membership price..." }));
-      const priceInWei = BigInt(Math.floor(nftPrice * 1e18)); // Convert ETH to wei
+      const priceInTokens = BigInt(Math.floor(nftPrice * 1e18)); // Convert to token units with 18 decimals
       
       const updatePriceTx = prepareContractCall({
         contract,
         method: "function updateMembershipPrice(uint256)",
-        params: [priceInWei]
+        params: [priceInTokens]
       });
       
       await sendTransaction(updatePriceTx);
@@ -144,6 +154,16 @@ export default function CreateCommunity() {
       
       await sendTransaction(updateLimitTx);
       
+      // Set payment token if needed (only needed once, but included for completeness)
+      setFormData(prev => ({ ...prev, deploymentStep: "Setting payment token..." }));
+      const updatePaymentTokenTx = prepareContractCall({
+        contract,
+        method: "function updatePaymentToken(address)",
+        params: [GROW_TOKEN_ADDRESS]
+      });
+      
+      await sendTransaction(updatePaymentTokenTx);
+      
       // Create community data for your database
       const communityData = {
         name: formData.name,
@@ -153,6 +173,8 @@ export default function CreateCommunity() {
         membershipLimit,
         nftContractAddress: LAUNCH_MEMBERSHIP_CONTRACT_ADDRESS,
         nftPrice,
+        paymentTokenAddress: GROW_TOKEN_ADDRESS,
+        paymentTokenSymbol: "GROW",
         creatorAddress: activeAccount.address,
         createdAt: new Date().toISOString(),
       };
@@ -365,19 +387,22 @@ export default function CreateCommunity() {
                 
                 <div>
                   <label htmlFor="nftPrice" className="block text-sm font-medium text-zinc-700 mb-1">
-                    Membership Price (ETH)
+                    Membership Price ($GROW tokens)
                   </label>
                   <input
                     type="number"
                     id="nftPrice"
                     name="nftPrice"
-                    step="0.001"
+                    step="1"
                     min="0"
                     required
                     value={formData.nftPrice}
                     onChange={handleChange}
                     className="w-full border border-zinc-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
+                  <p className="text-xs text-zinc-500 mt-1">
+                    Members will pay with $GROW tokens instead of ETH
+                  </p>
                 </div>
               </div>
             </div>

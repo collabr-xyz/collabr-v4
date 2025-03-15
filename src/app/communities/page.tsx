@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { ConnectButton } from "thirdweb/react";
+import { ConnectButton, useActiveAccount } from "thirdweb/react";
 import { client } from "../client";
 
 // Community type definition
@@ -20,10 +20,25 @@ interface Community {
   createdAt: string;
 }
 
+// Approved addresses for community creation (same as in communities page)
+const APPROVED_CREATORS = [
+  "0xc1C7C9C7A22885e323250e198c5f7374c0C9c5D5", // Example address
+];
+
 export default function Communities() {
   const [communities, setCommunities] = useState<Community[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const activeAccount = useActiveAccount();
+  
+  // Check if current user is approved to create communities
+  const isApprovedCreator = activeAccount ? 
+    APPROVED_CREATORS.includes(activeAccount.address) : false;
+  
+  // Function to check if user is creator of a community
+  const isCreatorOf = (community: Community) => {
+    return activeAccount && activeAccount.address === community.creatorAddress;
+  };
   
   useEffect(() => {
     async function fetchCommunities() {
@@ -55,9 +70,11 @@ export default function Communities() {
             <p className="text-zinc-500 mt-1 text-sm">Discover and join communities with NFT memberships</p>
           </div>
           <div className="flex items-center gap-4">
-            <Link href="/communities/create" className="px-4 py-2 bg-[#008CFF] text-white rounded-full hover:bg-[#0070CC] transition">
-              Create Club
-            </Link>
+            {isApprovedCreator && (
+              <Link href="/communities/create" className="px-4 py-2 bg-[#008CFF] text-white rounded-full hover:bg-[#0070CC] transition">
+                Create Club
+              </Link>
+            )}
             <ConnectButton
               client={client}
               appMetadata={{
@@ -136,9 +153,11 @@ export default function Communities() {
           <div className="text-center py-20 bg-white rounded-md shadow-sm">
             <h2 className="text-xl font-medium mb-4">No Clubs Yet</h2>
             <p className="text-zinc-500 mb-6">Be the first to create a club!</p>
-            <Link href="/communities/create" className="px-6 py-3 bg-[#008CFF] text-white rounded-full hover:bg-[#0070CC] transition">
-              Create Club
-            </Link>
+            {isApprovedCreator && (
+              <Link href="/communities/create" className="px-6 py-3 bg-[#008CFF] text-white rounded-full hover:bg-[#0070CC] transition">
+                Create Club
+              </Link>
+            )}
           </div>
         ) : (
           <div className="space-y-3">
@@ -203,8 +222,10 @@ export default function Communities() {
                   
                   {/* Join button and price */}
                   <div className="ml-4 flex-shrink-0 flex flex-col items-center">
-                    <Link href={`/communities/${community.id}`} className="inline-block px-4 py-1.5 bg-[#008CFF] text-white text-sm font-medium rounded-full hover:bg-[#0070CC] transition mb-2">
-                      Join
+                    <Link href={`/communities/${community.id}`} className={`inline-block px-4 py-1.5 text-white text-sm font-medium rounded-full hover:bg-[#0070CC] transition mb-2 ${
+                      isCreatorOf(community) ? 'bg-black' : 'bg-[#008CFF]'
+                    }`}>
+                      {isCreatorOf(community) ? 'View' : 'Join'}
                     </Link>
                     <span className="text-xs font-medium text-zinc-500">{community.nftPrice} ETH</span>
                   </div>
