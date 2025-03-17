@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ConnectButton, useActiveAccount, useSendTransaction } from "thirdweb/react";
 import { client } from "../../client";
-import { getContract, prepareContractCall, defineChain } from "thirdweb";
+import { getContract, prepareContractCall, defineChain, readContract } from "thirdweb";
 import { collection, addDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 
@@ -35,8 +35,8 @@ const baseSepolia = defineChain({
   testnet: true,
 });
 
-// Deployed LaunchMembership contract address
-const LAUNCH_MEMBERSHIP_CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_LAUNCH_MEMBERSHIP_CONTRACT_ADDRESS || "0xE6a6F147eb758DC442045fBaE17f2154a08D6CEC";
+// Deployed MembershipFactory contract address
+const LAUNCH_MEMBERSHIP_FACTORY_ADDRESS = process.env.NEXT_PUBLIC_LAUNCH_MEMBERSHIP_FACTORY_ADDRESS || "0xeDd3c1ebd02034551d6D8f08466711Ddf5FfBd20";
 
 // $GROW token contract address
 const GROW_TOKEN_ADDRESS = process.env.NEXT_PUBLIC_GROW_TOKEN_ADDRESS || "0x2d06C90890BfE06c0538F9bf5c76d3567341a7DA";
@@ -74,6 +74,7 @@ export default function CreateCommunity() {
     isLoading: false,
     error: "",
     deploymentStep: "",
+    deployedContractAddress: "",
   });
   
   // Handle form input changes
@@ -104,100 +105,110 @@ export default function CreateCommunity() {
       const nftPrice = parseFloat(formData.nftPrice);
       const tagsArray = formData.tags.split(',').map(tag => tag.trim()).filter(tag => tag);
       
-      setFormData(prev => ({ ...prev, deploymentStep: "Connecting to contract..." }));
+      setFormData(prev => ({ ...prev, deploymentStep: "Deploying new membership contract..." }));
       
-      // Get the deployed LaunchMembership contract
-      const contract = getContract({
+      // Deploy a new membership contract for this community using the factory
+      // The factory will deploy a new LaunchMembershipV4 contract for each community
+      const deployContract = getContract({
         client,
-        address: LAUNCH_MEMBERSHIP_CONTRACT_ADDRESS,
-        chain: baseSepolia, // Using Base Sepolia testnet
-      });
-      
-      // Get the $GROW token contract
-      const growTokenContract = getContract({
-        client,
-        address: GROW_TOKEN_ADDRESS,
+        address: LAUNCH_MEMBERSHIP_FACTORY_ADDRESS, // The factory contract that deploys individual membership contracts
         chain: baseSepolia,
       });
       
-      // Create a new club by calling the contract methods
-      setFormData(prev => ({ ...prev, deploymentStep: "Updating club info..." }));
-      
-      // Update club info
-      const updateInfoTx = prepareContractCall({
-        contract,
-        method: "function updateClubInfo(string,string,string)",
-        params: [formData.name, formData.description, formData.image]
-      });
-      
-      await sendTransaction(updateInfoTx);
-      
-      // Update membership price
-      setFormData(prev => ({ ...prev, deploymentStep: "Updating membership price..." }));
-      const priceInTokens = BigInt(Math.floor(nftPrice * 1e18)); // Convert to token units with 18 decimals
-      
-      const updatePriceTx = prepareContractCall({
-        contract,
-        method: "function updateMembershipPrice(uint256)",
-        params: [priceInTokens]
-      });
-      
-      await sendTransaction(updatePriceTx);
-      
-      // Update membership limit
-      setFormData(prev => ({ ...prev, deploymentStep: "Updating membership limit..." }));
-      const updateLimitTx = prepareContractCall({
-        contract,
-        method: "function updateMembershipLimit(uint256)",
-        params: [BigInt(membershipLimit)]
-      });
-      
-      await sendTransaction(updateLimitTx);
-      
-      // Set payment token if needed (only needed once, but included for completeness)
-      setFormData(prev => ({ ...prev, deploymentStep: "Setting payment token..." }));
-      const updatePaymentTokenTx = prepareContractCall({
-        contract,
-        method: "function updatePaymentToken(address)",
-        params: [GROW_TOKEN_ADDRESS]
-      });
-      
-      await sendTransaction(updatePaymentTokenTx);
-      
-      // Create community data for your database
-      const communityData = {
-        name: formData.name,
-        description: formData.description,
-        image: formData.image,
-        tags: tagsArray,
-        membershipLimit,
-        nftContractAddress: LAUNCH_MEMBERSHIP_CONTRACT_ADDRESS,
-        nftPrice,
-        paymentTokenAddress: GROW_TOKEN_ADDRESS,
-        paymentTokenSymbol: "GROW",
-        creatorAddress: activeAccount.address,
-        createdAt: new Date().toISOString(),
-      };
-      
-      // Save community data to Firebase
-      setFormData(prev => ({ ...prev, deploymentStep: "Launching your club..." }));
+      // Convert the price to token units with 18 decimals
+      const priceInTokens = BigInt(Math.floor(nftPrice * 1e18));
       
       try {
-        // Add a new document to the "communities" collection
-        const docRef = await addDoc(collection(db, "communities"), communityData);
-        console.log("Community saved with ID:", docRef.id);
+        // Deploy a new contract with all the parameters set correctly from the start
+        const deployTx = prepareContractCall({
+          contract: deployContract,
+          method: "function deployMembershipContract(string,string,string,uint256,uint256,string,string,address)",
+          params: [
+            formData.name, // clubName
+            formData.description, // clubDescription
+            formData.image, // clubImageURI
+            BigInt(membershipLimit), // membershipLimit
+            priceInTokens, // membershipPrice (already in correct format with 18 decimals)
+            formData.nftName || `${formData.name} Membership`, // nftName
+            formData.nftSymbol || formData.name.substring(0, 4).toUpperCase(), // nftSymbol
+            GROW_TOKEN_ADDRESS // paymentToken
+          ],
+          gas: 5000000n, // Higher gas limit for contract deployment
+        });
         
-        // Redirect to the new community page
-        router.push(`/communities/${docRef.id}`);
-      } catch (firestoreError) {
-        console.error("Error saving to Firestore:", firestoreError);
+        const deployResult = await sendTransaction(deployTx);
+        console.log("Deployment transaction:", deployResult);
+        
+        // Wait for the transaction to be mined (this is simplified, you might need event listeners)
+        setFormData(prev => ({ ...prev, deploymentStep: "Waiting for contract deployment confirmation..." }));
+        await new Promise(resolve => setTimeout(resolve, 20000)); // Wait 20 seconds for deployment
+        
+        // Get the contract address from events (this is simplified)
+        // In a real implementation, you'd listen for events or use the transaction receipt
+        // to get the newly deployed contract address
+        const factoryContract = getContract({
+          client,
+          address: LAUNCH_MEMBERSHIP_FACTORY_ADDRESS,
+          chain: baseSepolia,
+        });
+        
+        // Get the most recently deployed contract by this user
+        // Note: In production, you should use event logs to get this address reliably
+        const newContractAddress = await readContract({
+          contract: factoryContract,
+          method: "function getLastDeployedContract(address) view returns (address)",
+          params: [activeAccount.address]
+        });
+        
+        if (!newContractAddress) {
+          throw new Error("Failed to retrieve the deployed contract address");
+        }
+        
+        setFormData(prev => ({ 
+          ...prev, 
+          deployedContractAddress: newContractAddress,
+          deploymentStep: "Contract deployed successfully! Creating community..." 
+        }));
+        
+        // Create community data for your database
+        const communityData = {
+          name: formData.name,
+          description: formData.description,
+          image: formData.image,
+          tags: tagsArray,
+          membershipLimit,
+          nftContractAddress: newContractAddress, // Use the new unique contract address
+          nftPrice,
+          paymentTokenAddress: GROW_TOKEN_ADDRESS,
+          paymentTokenSymbol: "GROW",
+          creatorAddress: activeAccount.address,
+          createdAt: new Date().toISOString(),
+        };
+        
+        // Save community data to Firebase
+        try {
+          // Add a new document to the "communities" collection
+          const docRef = await addDoc(collection(db, "communities"), communityData);
+          console.log("Community saved with ID:", docRef.id);
+          
+          // Redirect to the new community page
+          router.push(`/communities/${docRef.id}`);
+        } catch (firestoreError) {
+          console.error("Error saving to Firestore:", firestoreError);
+          setFormData(prev => ({ 
+            ...prev, 
+            isLoading: false, 
+            error: "Failed to save community data to Firebase. Please try again." 
+          }));
+        }
+      } catch (contractError) {
+        console.error("Contract deployment error:", contractError);
         setFormData(prev => ({ 
           ...prev, 
           isLoading: false, 
-          error: "Failed to save community data to Firebase. Please try again." 
+          error: "Failed to deploy membership contract. Please try again."
         }));
       }
-      
     } catch (error) {
       console.error("Error creating community:", error);
       setFormData(prev => ({ 
@@ -435,7 +446,7 @@ export default function CreateCommunity() {
                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                   </svg>
                   <span>Club successfully created! You can view it on the <a 
-                    href={`https://sepolia-explorer.base.org/address/${LAUNCH_MEMBERSHIP_CONTRACT_ADDRESS}`}
+                    href={`https://sepolia-explorer.base.org/address/${LAUNCH_MEMBERSHIP_FACTORY_ADDRESS}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="underline"
