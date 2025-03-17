@@ -7,7 +7,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { ConnectButton, useActiveAccount, useSendTransaction } from "thirdweb/react";
 import { client } from "../../client";
-import { getContract, prepareContractCall, defineChain } from "thirdweb";
+import { getContract, prepareContractCall, defineChain, readContract } from "thirdweb";
 
 // Define Base Sepolia testnet
 const baseSepolia = defineChain({
@@ -47,6 +47,8 @@ interface Community {
   nftPrice: number;
   creatorAddress: string;
   createdAt: string;
+  paymentTokenAddress?: string; // Optional for backward compatibility
+  paymentTokenSymbol?: string; // Optional for backward compatibility
 }
 
 export default function CommunityDetail() {
@@ -103,29 +105,112 @@ export default function CommunityDetail() {
       setPurchaseStatus('loading');
       setPurchaseError(null);
       
-      // Get the contract
+      // Get the membership contract
       const contract = getContract({
         client,
         address: community.nftContractAddress,
         chain: baseSepolia,
       });
       
-      // Prepare the purchase transaction
-      const purchaseTx = prepareContractCall({
-        contract,
-        method: "function purchaseMembership()",
-        params: [],
-        value: BigInt(Math.floor(community.nftPrice * 1e18)), // Convert ETH to wei
+      // Get the GROW token address from environment variables
+      const growTokenAddress = process.env.NEXT_PUBLIC_GROW_TOKEN_ADDRESS || "0x2d06C90890BfE06c0538F9bf5c76d3567341a7DA";
+      console.log("Using GROW token address:", growTokenAddress);
+      
+      // Get the GROW token contract
+      const tokenContract = getContract({
+        client,
+        address: growTokenAddress,
+        chain: baseSepolia,
+      });
+
+      // Check user's token balance first
+      try {
+        const balanceResult = await readContract({
+          contract: tokenContract,
+          method: "function balanceOf(address) view returns (uint256)",
+          params: [activeAccount.address]
+        });
+        console.log("User GROW token balance:", balanceResult.toString());
+      } catch (error) {
+        console.error("Failed to check token balance:", error);
+      }
+      
+      // Check allowance before approve
+      try {
+        const allowanceResult = await readContract({
+          contract: tokenContract,
+          method: "function allowance(address,address) view returns (uint256)",
+          params: [activeAccount.address, community.nftContractAddress]
+        });
+        console.log("Current allowance:", allowanceResult.toString());
+      } catch (error) {
+        console.error("Failed to check allowance:", error);
+      }
+      
+      // First, approve the membership contract to spend GROW tokens
+      // The community.nftPrice is assumed to be in whole tokens, so we convert to wei (10^18)
+      const tokenAmount = BigInt(Math.floor(community.nftPrice * 1e18)); // Convert to token units with 18 decimals
+      console.log("Required token amount:", tokenAmount.toString());
+      
+      console.log("Approving tokens...");
+      // Prepare the approval transaction
+      const approveTx = prepareContractCall({
+        contract: tokenContract,
+        method: "function approve(address,uint256)",
+        params: [community.nftContractAddress, tokenAmount],
       });
       
-      // Send the transaction
-      await sendTransaction(purchaseTx);
+      // Send the approval transaction
+      const approvalResult = await sendTransaction(approveTx);
+      console.log("Approval transaction result:", approvalResult);
+      
+      // Verify that approval was successful
+      try {
+        const newAllowance = await readContract({
+          contract: tokenContract,
+          method: "function allowance(address,address) view returns (uint256)",
+          params: [activeAccount.address, community.nftContractAddress]
+        });
+        console.log("New allowance after approval:", newAllowance.toString());
+        
+        if (newAllowance < tokenAmount) {
+          throw new Error("Approval unsuccessful: allowance is less than required amount");
+        }
+      } catch (error) {
+        console.error("Failed to verify allowance after approval:", error);
+        throw error;
+      }
+      
+      console.log("Purchasing membership...");
+      // Now prepare the purchase transaction (without sending ETH)
+      const purchaseTx = prepareContractCall({
+        contract,
+        method: "function purchaseMembership() returns (uint256)",
+        params: [],
+        // No value parameter here, as we're using ERC20 tokens
+      });
+      
+      // Send the purchase transaction
+      const purchaseResult = await sendTransaction(purchaseTx);
+      console.log("Purchase transaction result:", purchaseResult);
+      
+      // Check if the NFT was minted to the user
+      try {
+        const balanceOfNFT = await readContract({
+          contract,
+          method: "function balanceOf(address) view returns (uint256)",
+          params: [activeAccount.address]
+        });
+        console.log("User NFT balance after purchase:", balanceOfNFT.toString());
+      } catch (error) {
+        console.error("Failed to check NFT balance:", error);
+      }
       
       setPurchaseStatus('success');
     } catch (error) {
       console.error("Error purchasing membership:", error);
       setPurchaseStatus('error');
-      setPurchaseError("Failed to purchase membership. Please try again.");
+      setPurchaseError("Failed to purchase membership. Please check the console for details.");
     }
   };
   
@@ -249,7 +334,7 @@ export default function CommunityDetail() {
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
                   <span className="text-zinc-500">Membership Price:</span>
-                  <span className="font-medium">{community.nftPrice} ETH</span>
+                  <span className="font-medium">{community.nftPrice} $GROW</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-zinc-500">Membership Limit:</span>
@@ -332,7 +417,7 @@ export default function CommunityDetail() {
                     >
                       {purchaseStatus === 'loading' 
                         ? 'Processing...' 
-                        : `Purchase Membership for ${community.nftPrice} ETH`}
+                        : `Purchase Membership for ${community.nftPrice} $GROW`}
                     </button>
                     
                     {purchaseStatus === 'success' && (

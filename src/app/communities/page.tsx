@@ -227,7 +227,7 @@ export default function Communities() {
                     }`}>
                       {isCreatorOf(community) ? 'View' : 'Join'}
                     </Link>
-                    <span className="text-xs font-medium text-zinc-500">{community.nftPrice} ETH</span>
+                    <span className="text-xs font-medium text-zinc-500">{community.nftPrice} $GROW</span>
                   </div>
                 </div>
               </div>

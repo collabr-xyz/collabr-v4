@@ -29,7 +29,7 @@ The platform now uses $GROW tokens (ERC-20) instead of ETH for all membership tr
 - The LaunchMembership smart contract handles token transfers securely
 - Club creators can withdraw accumulated $GROW tokens from their clubs
 
-The $GROW token contract is deployed at: `0x2d06C90890BfE06c0538F9bf5c76d3567341a7DA`
+The $GROW token contract address is configured in the environment variables as `NEXT_PUBLIC_GROW_TOKEN_ADDRESS`.
 
 ## Installation
 
@@ -43,13 +43,15 @@ yarn
 
 To run this project, you will need to add the following environment variables to your .env file:
 
-`CLIENT_ID` - Your Thirdweb client ID
-`FIREBASE_API_KEY` - Your Firebase API key
-`FIREBASE_AUTH_DOMAIN` - Your Firebase auth domain
-`FIREBASE_PROJECT_ID` - Your Firebase project ID
-`FIREBASE_STORAGE_BUCKET` - Your Firebase storage bucket
-`FIREBASE_MESSAGING_SENDER_ID` - Your Firebase messaging sender ID
-`FIREBASE_APP_ID` - Your Firebase app ID
+`NEXT_PUBLIC_TEMPLATE_CLIENT_ID` - Your Thirdweb client ID
+`NEXT_PUBLIC_FIREBASE_API_KEY` - Your Firebase API key
+`NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` - Your Firebase auth domain
+`NEXT_PUBLIC_FIREBASE_PROJECT_ID` - Your Firebase project ID
+`NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET` - Your Firebase storage bucket
+`NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID` - Your Firebase messaging sender ID
+`NEXT_PUBLIC_FIREBASE_APP_ID` - Your Firebase app ID
+`NEXT_PUBLIC_GROW_TOKEN_ADDRESS` - The address of the $GROW token contract
+`NEXT_PUBLIC_LAUNCH_MEMBERSHIP_CONTRACT_ADDRESS` - The address of the LaunchMembership contract
 
 ## Development
 

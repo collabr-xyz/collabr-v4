@@ -36,14 +36,14 @@ const baseSepolia = defineChain({
 });
 
 // Deployed LaunchMembership contract address
-const LAUNCH_MEMBERSHIP_CONTRACT_ADDRESS = "0x95019A575DC807a6153471262bec892dDdf3e61e";
+const LAUNCH_MEMBERSHIP_CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_LAUNCH_MEMBERSHIP_CONTRACT_ADDRESS || "0xE6a6F147eb758DC442045fBaE17f2154a08D6CEC";
 
 // $GROW token contract address
-const GROW_TOKEN_ADDRESS = "0x2d06C90890BfE06c0538F9bf5c76d3567341a7DA"; // Replace with your actual $GROW token address
+const GROW_TOKEN_ADDRESS = process.env.NEXT_PUBLIC_GROW_TOKEN_ADDRESS || "0x2d06C90890BfE06c0538F9bf5c76d3567341a7DA";
 
 // Approved addresses for community creation (same as in communities page)
 const APPROVED_CREATORS = [
-  "0xc1C7C9C7A22885e323250e198c5f7374c0C9c5D5", // Example address
+  "0xc1C7C9C7A22885e323250e198c5f7374c0C9c5D5",
 ];
 
 export default function CreateCommunity() {
@@ -180,7 +180,7 @@ export default function CreateCommunity() {
       };
       
       // Save community data to Firebase
-      setFormData(prev => ({ ...prev, deploymentStep: "Saving community data to Firebase..." }));
+      setFormData(prev => ({ ...prev, deploymentStep: "Launching your club..." }));
       
       try {
         // Add a new document to the "communities" collection
