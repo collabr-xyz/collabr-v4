@@ -81,6 +81,7 @@ export default function CommunityDetail() {
   const [priceUpdateError, setPriceUpdateError] = useState<string | null>(null);
   const [priceUpdateSuccess, setPriceUpdateSuccess] = useState(false);
   const [sharedContractWarning, setSharedContractWarning] = useState<string | null>(null);
+  const [memberCount, setMemberCount] = useState<number | null>(null);
   
   // Function to check if multiple communities share the same contract address
   async function checkForSharedContracts(contractAddress: string, currentCommunityId: string) {
@@ -132,6 +133,25 @@ export default function CommunityDetail() {
           // Check if this community shares its contract address with others
           if (communityData.nftContractAddress) {
             await checkForSharedContracts(communityData.nftContractAddress, communityId);
+            
+            // Fetch the current member count from the contract
+            try {
+              const contract = getContract({
+                client,
+                address: communityData.nftContractAddress,
+                chain: baseSepolia,
+              });
+              
+              const totalMembers = await readContract({
+                contract,
+                method: "function totalMembers() view returns (uint256)",
+                params: []
+              });
+              
+              setMemberCount(Number(totalMembers));
+            } catch (error) {
+              console.error("Error fetching member count:", error);
+            }
           }
           
           // Check if the active account is the creator
@@ -508,6 +528,19 @@ export default function CommunityDetail() {
         // Success!
         setPurchaseError(null);
         setPurchaseStatus('success');
+        
+        // Refresh the member count after successful purchase
+        try {
+          const totalMembers = await readContract({
+            contract,
+            method: "function totalMembers() view returns (uint256)",
+            params: []
+          });
+          
+          setMemberCount(Number(totalMembers));
+        } catch (error) {
+          console.error("Error updating member count:", error);
+        }
       } catch (error) {
         console.error("Error during purchase transaction:", error);
         
@@ -769,7 +802,7 @@ export default function CommunityDetail() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-zinc-500">Membership Limit:</span>
-                  <span>{community.membershipLimit} members</span>
+                  <span>{memberCount !== null ? `${memberCount} / ` : ''}{community.membershipLimit} members</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-zinc-500">Contract Address:</span>
@@ -912,15 +945,6 @@ export default function CommunityDetail() {
                         ? 'Processing...' 
                         : `Purchase Membership for ${community.nftPrice} $GROW`}
                     </button>
-                    
-                    {/* Contract Information */}
-                    <div className="mt-4 bg-zinc-50 p-3 rounded-lg">
-                      <p className="text-xs text-zinc-500 mb-1">Contract Address:</p>
-                      <p className="text-sm font-mono break-all">{community.nftContractAddress}</p>
-                      <div className="mt-2 text-xs text-zinc-500">
-                        <p>Note: Communities sharing the same contract address can only be joined once per user.</p>
-                      </div>
-                    </div>
                     
                     {purchaseStatus === 'success' && (
                       <div className="mt-4 bg-green-50 text-green-600 p-4 rounded-lg text-sm">
