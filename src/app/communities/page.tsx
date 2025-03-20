@@ -5,6 +5,21 @@ import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { ConnectButton, useActiveAccount } from "thirdweb/react";
 import { client } from "../client";
+import { getContract, readContract, defineChain } from "thirdweb";
+
+// Define Base Sepolia testnet
+const baseSepolia = defineChain({
+  id: 84532,
+  name: "Base Sepolia",
+  rpcUrls: {
+    default: {
+      http: ["https://sepolia.base.org"],
+    },
+    public: {
+      http: ["https://sepolia.base.org"],
+    },
+  },
+});
 
 // Community type definition
 interface Community {
@@ -18,6 +33,7 @@ interface Community {
   nftPrice: number;
   creatorAddress: string;
   createdAt: string;
+  memberCount?: number; // Optional as it will be fetched separately
 }
 
 // Approved addresses for community creation (same as in communities page)
@@ -46,10 +62,40 @@ export default function Communities() {
         const querySnapshot = await getDocs(collection(db, "communities"));
         const communitiesList = querySnapshot.docs.map(doc => ({
           id: doc.id,
-          ...doc.data()
+          ...doc.data(),
+          memberCount: 0 // Initialize with 0
         })) as Community[];
         
-        setCommunities(communitiesList);
+        // Fetch member counts for each community
+        const updatedCommunities = await Promise.all(communitiesList.map(async (community) => {
+          if (community.nftContractAddress) {
+            try {
+              const contract = getContract({
+                client,
+                address: community.nftContractAddress,
+                // Using baseSepolia chain as seen in the community detail page
+                chain: baseSepolia,
+              });
+              
+              const totalMembers = await readContract({
+                contract,
+                method: "function totalMembers() view returns (uint256)",
+                params: []
+              });
+              
+              return {
+                ...community,
+                memberCount: Number(totalMembers)
+              };
+            } catch (error) {
+              console.error(`Error fetching member count for ${community.id}:`, error);
+              return community;
+            }
+          }
+          return community;
+        }));
+        
+        setCommunities(updatedCommunities);
       } catch (error) {
         console.error("Error fetching communities:", error);
         setError("Failed to load communities. Please try again later.");
@@ -185,8 +231,7 @@ export default function Communities() {
                       </h2>
                     </Link>
                     <p className="text-xs text-zinc-500 mb-1">
-                      {/* Limit: {community.membershipLimit} members */}
-                      #Members: 92/100
+                      #Members: {community.memberCount !== undefined ? community.memberCount : '0'}/{community.membershipLimit}
                     </p>
                     <p className="text-sm text-zinc-700 mb-2 line-clamp-2">{community.description}</p>
                     

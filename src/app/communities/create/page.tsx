@@ -7,6 +7,7 @@ import { ConnectButton, useActiveAccount, useSendTransaction } from "thirdweb/re
 import { client } from "../../client";
 import { getContract, prepareContractCall, defineChain, readContract } from "thirdweb";
 import { collection, addDoc } from 'firebase/firestore';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db } from '../../lib/firebase';
 
 // Define Base Sepolia testnet
@@ -77,10 +78,70 @@ export default function CreateCommunity() {
     deployedContractAddress: "",
   });
   
+  // Add image upload state
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  
   // Handle form input changes
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    
+    // For club name, enforce formatting rules
+    if (name === 'name') {
+      // First replace any whitespace with hyphens
+      const noWhitespace = value.replace(/\s+/g, '-');
+      // Then remove any characters that aren't letters, numbers, or hyphens
+      const validCharsOnly = noWhitespace.replace(/[^a-zA-Z0-9-]/g, '');
+      setFormData(prev => ({ ...prev, [name]: validCharsOnly }));
+    } else {
+      setFormData(prev => ({ ...prev, [name]: value }));
+    }
+  };
+  
+  // Handle image file selection
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        setFormData(prev => ({ ...prev, error: "Please select an image file" }));
+        return;
+      }
+      
+      setImageFile(file);
+      
+      // Create a preview
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setImagePreview(event.target?.result as string);
+      };
+      reader.readAsDataURL(file);
+      
+      // Clear any previous error
+      setFormData(prev => ({ ...prev, error: "" }));
+    }
+  };
+  
+  // Upload image to Firebase Storage
+  const uploadImage = async (file: File): Promise<string> => {
+    setIsUploading(true);
+    
+    try {
+      const storage = getStorage();
+      const storageRef = ref(storage, `communities/${Date.now()}_${file.name}`);
+      
+      const snapshot = await uploadBytes(storageRef, file);
+      const downloadURL = await getDownloadURL(snapshot.ref);
+      
+      return downloadURL;
+    } catch (error) {
+      console.error("Error uploading image:", error);
+      throw new Error("Failed to upload image");
+    } finally {
+      setIsUploading(false);
+    }
   };
   
   // Handle form submission
@@ -92,12 +153,36 @@ export default function CreateCommunity() {
       return;
     }
     
+    // Validate required fields
+    if (!formData.name || !formData.description || 
+        !formData.membershipLimit || !formData.nftPrice) {
+      setFormData(prev => ({ ...prev, error: "Please fill in all required fields" }));
+      return;
+    }
+    
+    // Validate club name format
+    const nameRegex = /^[a-zA-Z0-9-]+$/;
+    if (!nameRegex.test(formData.name)) {
+      setFormData(prev => ({ 
+        ...prev, 
+        error: "Club name must only contain letters, numbers, and hyphens (no spaces or special characters)" 
+      }));
+      return;
+    }
+    
+    // Validate image (either uploaded file or URL)
+    if (!imageFile && !formData.image) {
+      setFormData(prev => ({ ...prev, error: "Please provide an image for your club" }));
+      return;
+    }
+    
     try {
       // Set the NFT name to match club name
       const updatedFormData = {
         ...formData,
         nftName: formData.name, // Auto-set NFT name to match club name
         nftSymbol: formData.name.substring(0, 4).toUpperCase(), // Auto-generate symbol
+        nftDescription: `Membership for ${formData.name}`, // Auto-generate description
       };
       
       setFormData(prev => ({ 
@@ -106,6 +191,19 @@ export default function CreateCommunity() {
         error: "", 
         deploymentStep: "Initializing..." 
       }));
+      
+      // Upload image if provided
+      if (imageFile) {
+        setFormData(prev => ({ ...prev, deploymentStep: "Uploading image..." }));
+        try {
+          const imageUrl = await uploadImage(imageFile);
+          updatedFormData.image = imageUrl;
+        } catch (uploadError) {
+          throw new Error("Failed to upload image. Please try again.");
+        }
+      } else if (!formData.image) {
+        throw new Error("Please provide an image for your club");
+      }
       
       // Parse form data
       const membershipLimit = parseInt(updatedFormData.membershipLimit);
@@ -233,7 +331,7 @@ export default function CreateCommunity() {
         <div className="flex justify-between items-center mb-8">
           <div>
             <h1 className="text-2xl font-medium">Create New Club</h1>
-            <p className="text-zinc-500 mt-1 text-sm">Launch your own community with NFT membership</p>
+            <p className="text-zinc-500 mt-1 text-sm">Launch a community</p>
           </div>
           <div className="flex items-center gap-4">
             <Link href="/communities" className="text-sm text-zinc-500 hover:text-zinc-800 transition">
@@ -263,6 +361,11 @@ export default function CreateCommunity() {
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-8">
+            {/* Required fields note */}
+            <div className="text-sm text-zinc-500 mb-4">
+              <span className="text-red-500">*</span> Required fields
+            </div>
+            
             {/* Combined Club and Membership Information Section */}
             <div className="border border-zinc-100 rounded-lg p-6">
               <h2 className="text-xl font-medium mb-6">Club Information</h2>
@@ -270,7 +373,7 @@ export default function CreateCommunity() {
               <div className="space-y-4">
                 <div>
                   <label htmlFor="name" className="block text-sm font-medium text-zinc-700 mb-1">
-                    Club Name
+                    Club Name <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
@@ -279,17 +382,17 @@ export default function CreateCommunity() {
                     required
                     value={formData.name}
                     onChange={handleChange}
-                    placeholder="e.g. #culés"
+                    placeholder="e.g. michael-bubles-club"
                     className="w-full border border-zinc-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <p className="text-xs text-zinc-500 mt-1">
-                    This will also be used as your NFT collection name
+                    This will be used as your NFT collection name. Only letters, numbers, and hyphens allowed (no spaces).
                   </p>
                 </div>
                 
                 <div>
                   <label htmlFor="description" className="block text-sm font-medium text-zinc-700 mb-1">
-                    Description
+                    Description <span className="text-red-500">*</span>
                   </label>
                   <textarea
                     id="description"
@@ -305,38 +408,52 @@ export default function CreateCommunity() {
                 
                 <div>
                   <label htmlFor="image" className="block text-sm font-medium text-zinc-700 mb-1">
-                    Club Image URL
+                    Club Image <span className="text-red-500">*</span>
                   </label>
-                  <input
-                    type="url"
-                    id="image"
-                    name="image"
-                    required
-                    value={formData.image}
-                    onChange={handleChange}
-                    placeholder="https://example.com/image.jpg"
-                    className="w-full border border-zinc-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                
-                <div>
-                  <label htmlFor="tags" className="block text-sm font-medium text-zinc-700 mb-1">
-                    Tags (comma separated)
-                  </label>
-                  <input
-                    type="text"
-                    id="tags"
-                    name="tags"
-                    value={formData.tags}
-                    onChange={handleChange}
-                    placeholder="e.g. Sports, Soccer, Football"
-                    className="w-full border border-zinc-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+                  
+                  {/* Image preview */}
+                  {imagePreview && (
+                    <div className="mb-3">
+                      <img 
+                        src={imagePreview} 
+                        alt="Preview" 
+                        className="w-32 h-32 object-cover rounded-lg border border-zinc-200" 
+                      />
+                    </div>
+                  )}
+                  
+                  <div className="flex items-center space-x-3">
+                    <label className="cursor-pointer px-4 py-2 bg-zinc-100 hover:bg-zinc-200 rounded-lg text-sm transition-colors">
+                      Upload Image
+                      <input
+                        type="file"
+                        id="imageUpload"
+                        accept="image/*"
+                        onChange={handleImageSelect}
+                        className="hidden"
+                      />
+                    </label>
+                    
+                    <span className="text-xs text-zinc-500">or</span>
+                    
+                    <input
+                      type="url"
+                      id="image"
+                      name="image"
+                      value={formData.image}
+                      onChange={handleChange}
+                      placeholder="Paste image URL"
+                      className="flex-1 border border-zinc-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <p className="text-xs text-zinc-500 mt-1">
+                    Upload an image or provide a URL for your club's image (required)
+                  </p>
                 </div>
                 
                 <div>
                   <label htmlFor="membershipLimit" className="block text-sm font-medium text-zinc-700 mb-1">
-                    Membership Limit
+                    Membership Limit <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="number"
@@ -352,24 +469,8 @@ export default function CreateCommunity() {
                 </div>
                 
                 <div>
-                  <label htmlFor="nftDescription" className="block text-sm font-medium text-zinc-700 mb-1">
-                    Membership Benefits
-                  </label>
-                  <textarea
-                    id="nftDescription"
-                    name="nftDescription"
-                    required
-                    value={formData.nftDescription}
-                    onChange={handleChange}
-                    placeholder="Describe the membership benefits"
-                    rows={3}
-                    className="w-full border border-zinc-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                
-                <div>
                   <label htmlFor="nftPrice" className="block text-sm font-medium text-zinc-700 mb-1">
-                    Membership Price ($GROW tokens)
+                    Membership Price ($GROW tokens) <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="number"
@@ -384,6 +485,24 @@ export default function CreateCommunity() {
                   />
                   <p className="text-xs text-zinc-500 mt-1">
                     Members will pay with $GROW tokens instead of ETH
+                  </p>
+                </div>
+
+                <div>
+                  <label htmlFor="tags" className="block text-sm font-medium text-zinc-700 mb-1">
+                    Tags (comma separated)
+                  </label>
+                  <input
+                    type="text"
+                    id="tags"
+                    name="tags"
+                    value={formData.tags}
+                    onChange={handleChange}
+                    placeholder="e.g. Sports, Soccer, Football"
+                    className="w-full border border-zinc-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="text-xs text-zinc-500 mt-1">
+                    Optional: Add tags to categorize your club
                   </p>
                 </div>
               </div>
@@ -439,7 +558,9 @@ export default function CreateCommunity() {
                     : 'bg-[#008CFF] hover:bg-[#0070CC]'
                 }`}
               >
-                {formData.isLoading ? 'Creating...' : 'Create Club'}
+                {formData.isLoading ? 
+                  (isUploading ? 'Uploading...' : 'Creating...') 
+                  : 'Create Club'}
               </button>
             </div>
           </form>
