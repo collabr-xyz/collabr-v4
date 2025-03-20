@@ -11,6 +11,7 @@ import { getContract, readContract, defineChain } from "thirdweb";
 const baseSepolia = defineChain({
   id: 84532,
   name: "Base Sepolia",
+  rpc: "https://sepolia.base.org",
   rpcUrls: {
     default: {
       http: ["https://sepolia.base.org"],
@@ -19,6 +20,18 @@ const baseSepolia = defineChain({
       http: ["https://sepolia.base.org"],
     },
   },
+  nativeCurrency: {
+    name: "Ethereum",
+    symbol: "ETH",
+    decimals: 18,
+  },
+  blockExplorers: {
+    default: {
+      name: "BaseScan",
+      url: "https://sepolia-explorer.base.org",
+    },
+  },
+  testnet: true,
 });
 
 // Community type definition
