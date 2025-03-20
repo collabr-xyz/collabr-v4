@@ -93,6 +93,13 @@ export default function CreateCommunity() {
     }
     
     try {
+      // Set the NFT name to match club name
+      const updatedFormData = {
+        ...formData,
+        nftName: formData.name, // Auto-set NFT name to match club name
+        nftSymbol: formData.name.substring(0, 4).toUpperCase(), // Auto-generate symbol
+      };
+      
       setFormData(prev => ({ 
         ...prev, 
         isLoading: true, 
@@ -101,9 +108,9 @@ export default function CreateCommunity() {
       }));
       
       // Parse form data
-      const membershipLimit = parseInt(formData.membershipLimit);
-      const nftPrice = parseFloat(formData.nftPrice);
-      const tagsArray = formData.tags.split(',').map(tag => tag.trim()).filter(tag => tag);
+      const membershipLimit = parseInt(updatedFormData.membershipLimit);
+      const nftPrice = parseFloat(updatedFormData.nftPrice);
+      const tagsArray = updatedFormData.tags.split(',').map(tag => tag.trim()).filter(tag => tag);
       
       setFormData(prev => ({ ...prev, deploymentStep: "Deploying new membership contract..." }));
       
@@ -124,13 +131,13 @@ export default function CreateCommunity() {
           contract: deployContract,
           method: "function deployMembershipContract(string,string,string,uint256,uint256,string,string,address)",
           params: [
-            formData.name, // clubName
-            formData.description, // clubDescription
-            formData.image, // clubImageURI
+            updatedFormData.name, // clubName
+            updatedFormData.description, // clubDescription
+            updatedFormData.image, // clubImageURI
             BigInt(membershipLimit), // membershipLimit
             priceInTokens, // membershipPrice (already in correct format with 18 decimals)
-            formData.nftName || `${formData.name} Membership`, // nftName
-            formData.nftSymbol || formData.name.substring(0, 4).toUpperCase(), // nftSymbol
+            updatedFormData.nftName || `${updatedFormData.name} Membership`, // nftName
+            updatedFormData.nftSymbol || updatedFormData.name.substring(0, 4).toUpperCase(), // nftSymbol
             GROW_TOKEN_ADDRESS // paymentToken
           ],
           gas: 5000000n, // Higher gas limit for contract deployment
@@ -172,9 +179,9 @@ export default function CreateCommunity() {
         
         // Create community data for your database
         const communityData = {
-          name: formData.name,
-          description: formData.description,
-          image: formData.image,
+          name: updatedFormData.name,
+          description: updatedFormData.description,
+          image: updatedFormData.image,
           tags: tagsArray,
           membershipLimit,
           nftContractAddress: newContractAddress, // Use the new unique contract address
@@ -256,7 +263,7 @@ export default function CreateCommunity() {
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-8">
-            {/* Club Information Section */}
+            {/* Combined Club and Membership Information Section */}
             <div className="border border-zinc-100 rounded-lg p-6">
               <h2 className="text-xl font-medium mb-6">Club Information</h2>
               
@@ -275,6 +282,9 @@ export default function CreateCommunity() {
                     placeholder="e.g. #culés"
                     className="w-full border border-zinc-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
+                  <p className="text-xs text-zinc-500 mt-1">
+                    This will also be used as your NFT collection name
+                  </p>
                 </div>
                 
                 <div>
@@ -340,49 +350,10 @@ export default function CreateCommunity() {
                     className="w-full border border-zinc-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
-              </div>
-            </div>
-            
-            {/* NFT Membership Section */}
-            <div className="border border-zinc-100 rounded-lg p-6">
-              <h2 className="text-xl font-medium mb-6">NFT Membership</h2>
-              
-              <div className="space-y-4">
-                <div>
-                  <label htmlFor="nftName" className="block text-sm font-medium text-zinc-700 mb-1">
-                    NFT Collection Name
-                  </label>
-                  <input
-                    type="text"
-                    id="nftName"
-                    name="nftName"
-                    required
-                    value={formData.nftName}
-                    onChange={handleChange}
-                    placeholder="e.g. Culés Membership"
-                    className="w-full border border-zinc-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                
-                <div>
-                  <label htmlFor="nftSymbol" className="block text-sm font-medium text-zinc-700 mb-1">
-                    NFT Symbol
-                  </label>
-                  <input
-                    type="text"
-                    id="nftSymbol"
-                    name="nftSymbol"
-                    required
-                    value={formData.nftSymbol}
-                    onChange={handleChange}
-                    placeholder="e.g. CULE"
-                    className="w-full border border-zinc-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
                 
                 <div>
                   <label htmlFor="nftDescription" className="block text-sm font-medium text-zinc-700 mb-1">
-                    NFT Description
+                    Membership Benefits
                   </label>
                   <textarea
                     id="nftDescription"
