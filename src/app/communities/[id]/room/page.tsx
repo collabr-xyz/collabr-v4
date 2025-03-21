@@ -1,5 +1,4 @@
 "use client";
-
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { doc, getDoc, collection, query, where, getDocs, addDoc, onSnapshot, orderBy, Timestamp, setDoc } from 'firebase/firestore';
@@ -28,6 +27,17 @@ interface Member {
   joinedAt: string;
 }
 
+interface MerchandiseItem {
+  id: string;
+  name: string;
+  description?: string;
+  imageUrl: string;
+  pointsCost: number;
+  communityId: string;
+  createdAt: string;
+  available: boolean;
+}
+
 interface Message {
   id: string;
   text: string;
@@ -52,6 +62,8 @@ export default function ChatRoom() {
   const [community, setCommunity] = useState<Community | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [merchandise, setMerchandise] = useState<MerchandiseItem[]>([]);
+  const [merchandiseLoading, setMerchandiseLoading] = useState(true);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -61,6 +73,7 @@ export default function ChatRoom() {
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [profileChecked, setProfileChecked] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [redeemMsg, setRedeemMsg] = useState<{show: boolean, item: string} | null>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
@@ -196,100 +209,80 @@ export default function ChatRoom() {
     async function fetchMembers() {
       try {
         console.log("Fetching members for community:", communityId);
+        // Create a Map to ensure unique members by wallet address
+        const membersMap = new Map<string, Member>();
+        
+        // 1. First fetch from Firestore database
         const q = query(collection(db, "members"), where("communityId", "==", communityId));
         const querySnapshot = await getDocs(q);
-        const membersData = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as Member[];
         
-        console.log(`Found ${membersData.length} members in the community`);
+        querySnapshot.docs.forEach(doc => {
+          const memberData = doc.data();
+          const walletAddress = memberData.walletAddress.toLowerCase();
+          membersMap.set(walletAddress, {
+            id: doc.id,
+            walletAddress: walletAddress, // Normalize wallet address
+            displayName: memberData.displayName,
+            avatarUrl: memberData.avatarUrl,
+            joinedAt: memberData.joinedAt
+          });
+        });
         
-        // Check for profiles and update member display names and avatars
-        const updatedMembersData = [...membersData];
+        console.log(`Found ${membersMap.size} members in the Firestore database`);
         
-        // Only try to update if there are members
-        if (updatedMembersData.length > 0) {
-          try {
-            // Get community profiles for these members
-            for (let i = 0; i < updatedMembersData.length; i++) {
-              const member = updatedMembersData[i];
-              const profileRef = doc(db, "communities", communityId, "profiles", member.walletAddress);
-              const profileSnapshot = await getDoc(profileRef);
-              
-              if (profileSnapshot.exists()) {
-                const profileData = profileSnapshot.data();
-                // Update member display name and avatar if they exist in profile
-                if (profileData.displayName) {
-                  updatedMembersData[i].displayName = profileData.displayName;
-                }
-                if (profileData.avatar) {
-                  updatedMembersData[i].avatarUrl = profileData.avatar;
-                }
-              }
-            }
-          } catch (err) {
-            console.error("Error fetching member profiles:", err);
-            // Continue with base member data if profile fetch fails
+        // 2. Ensure creator is included
+        if (community?.creatorAddress) {
+          const creatorAddress = community.creatorAddress.toLowerCase();
+          if (!membersMap.has(creatorAddress)) {
+            console.log("Adding creator to members list");
+            membersMap.set(creatorAddress, {
+              id: 'creator',
+              walletAddress: creatorAddress,
+              displayName: 'Creator',
+              joinedAt: community.createdAt || new Date().toISOString()
+            });
           }
         }
         
+        // 3. Enrich with profile data
+        for (const [walletAddress, member] of membersMap.entries()) {
+          try {
+            const profileRef = doc(db, "communities", communityId, "profiles", walletAddress);
+            const profileSnapshot = await getDoc(profileRef);
+            
+            if (profileSnapshot.exists()) {
+              const profileData = profileSnapshot.data();
+              if (profileData.displayName) {
+                member.displayName = profileData.displayName;
+              }
+              if (profileData.avatar) {
+                member.avatarUrl = profileData.avatar;
+              }
+            }
+          } catch (err) {
+            console.error(`Error fetching profile for member ${walletAddress}:`, err);
+            // Continue with existing member data
+          }
+        }
+        
+        // Convert Map to array
+        const updatedMembersData = Array.from(membersMap.values());
+        console.log(`Final member count: ${updatedMembersData.length}`);
         setMembers(updatedMembersData);
         
-        // Check if current user is a member
+        // 4. Check if current user is a member
         if (activeAccount?.address) {
           console.log("Current user wallet:", activeAccount.address);
+          const normalizedUserAddress = activeAccount.address.toLowerCase();
           
-          const isMember = updatedMembersData.some(
-            member => member.walletAddress.toLowerCase() === activeAccount.address.toLowerCase()
-          );
+          const isMember = membersMap.has(normalizedUserAddress);
+          const isCreator = community?.creatorAddress?.toLowerCase() === normalizedUserAddress;
           
-          const isCreator = community?.creatorAddress?.toLowerCase() === activeAccount.address.toLowerCase();
           console.log("Membership check - Is member:", isMember, "Is creator:", isCreator);
           
-          // Also check if the user is the creator of the community
-          if (isMember) {
-            console.log("Setting user status to 'member' (as regular member)");
+          if (isMember || isCreator) {
+            console.log("Setting user status to 'member'");
             setUserStatus('member');
-          } else if (isCreator) {
-            console.log("Setting user status to 'member' (as creator)");
-            setUserStatus('member'); // Treat creators as members
-            
-            // Add creator to members list if not already there
-            if (!updatedMembersData.some(m => m.walletAddress.toLowerCase() === activeAccount.address.toLowerCase())) {
-              console.log("Adding creator to members list");
-              
-              // Check if creator has a profile
-              let creatorDisplayName = 'Creator';
-              let creatorAvatarUrl = undefined;
-              
-              try {
-                const creatorProfileRef = doc(db, "communities", communityId, "profiles", activeAccount.address);
-                const creatorProfileSnapshot = await getDoc(creatorProfileRef);
-                
-                if (creatorProfileSnapshot.exists()) {
-                  const profileData = creatorProfileSnapshot.data();
-                  if (profileData.displayName) {
-                    creatorDisplayName = profileData.displayName;
-                  }
-                  if (profileData.avatar) {
-                    creatorAvatarUrl = profileData.avatar;
-                  }
-                }
-              } catch (err) {
-                console.error("Error fetching creator profile:", err);
-                // Continue with default creator display name
-              }
-              
-              const creatorMember: Member = {
-                id: 'creator',
-                walletAddress: activeAccount.address,
-                displayName: creatorDisplayName,
-                avatarUrl: creatorAvatarUrl,
-                joinedAt: community?.createdAt || new Date().toISOString()
-              };
-              setMembers([...updatedMembersData, creatorMember]);
-            }
           } else {
             console.log("Setting user status to 'nonmember'");
             setUserStatus('nonmember');
@@ -315,6 +308,38 @@ export default function ChatRoom() {
       setLoading(false);
     }
   }, [communityId, activeAccount?.address, community, error]);
+  
+  // Fetch merchandise items
+  useEffect(() => {
+    async function fetchMerchandise() {
+      if (!communityId) return;
+      
+      try {
+        console.log("Fetching merchandise items for community:", communityId);
+        const q = query(
+          collection(db, "merchandise"), 
+          where("communityId", "==", communityId),
+          where("available", "==", true)
+        );
+        
+        const querySnapshot = await getDocs(q);
+        const merchandiseData = querySnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as MerchandiseItem[];
+        
+        console.log(`Found ${merchandiseData.length} merchandise items for this community`);
+        setMerchandise(merchandiseData);
+      } catch (err) {
+        console.error("Error fetching merchandise:", err);
+        // Don't throw an error, just show empty state
+      } finally {
+        setMerchandiseLoading(false);
+      }
+    }
+    
+    fetchMerchandise();
+  }, [communityId]);
   
   // Subscribe to messages
   useEffect(() => {
@@ -482,6 +507,9 @@ export default function ChatRoom() {
       // Only add senderAvatar if it exists to avoid undefined values
       if (senderAvatar) {
         messageData.senderAvatar = senderAvatar;
+      } else {
+        // Add default avatar URL using DiceBear API
+        messageData.senderAvatar = `https://api.dicebear.com/7.x/identicon/svg?seed=${activeAccount.address}`;
       }
       
       // Add reply information if replying to a message
@@ -539,6 +567,22 @@ export default function ChatRoom() {
     } finally {
       setSendingMessage(false);
     }
+  };
+  
+  // Handle merchandise item redemption
+  const handleRedeem = (item: MerchandiseItem) => {
+    // Set the redemption message
+    setRedeemMsg({
+      show: true,
+      item: item.name
+    });
+    
+    // Hide the message after 3 seconds
+    setTimeout(() => {
+      setRedeemMsg(null);
+    }, 3000);
+    
+    console.log(`Attempted to redeem ${item.name} for ${item.pointsCost} points`);
   };
   
   if (error) {
@@ -630,7 +674,9 @@ export default function ChatRoom() {
       <div className="w-64 bg-gray-50 p-4 flex flex-col border-r border-gray-200 overflow-y-auto">
         <div className="mb-6">
           <h1 className="text-xl font-medium mb-1">{community?.name}</h1>
-          <div className="text-sm text-zinc-500">#{community?.id.substring(0, 6)}</div>
+          <div className="text-sm text-zinc-500">Contract: {community?.nftContractAddress ? 
+            `${community.nftContractAddress.substring(0, 6)}...${community.nftContractAddress.substring(community.nftContractAddress.length - 4)}` : 
+            'No contract address'}</div>
         </div>
         
         <div className="mb-6">
@@ -666,48 +712,48 @@ export default function ChatRoom() {
               <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              Jun 25, 2024 - 7:00 PM UTC
+              Jun 25, 2025 - 7:00 PM UTC
             </div>
           </div>
         </div>
         
         {/* Exclusive Merch Section */}
         <div className="mb-6">
-          <div className="text-xs uppercase text-zinc-500 font-medium mb-2">Exclusive Merch</div>
+          <div className="text-xs uppercase text-zinc-500 font-medium mb-2">Exclusive Items</div>
           <div className="space-y-3">
-            <div className="bg-white border border-gray-200 rounded-md p-3">
-              <div className="h-20 bg-gray-100 rounded-md mb-2 overflow-hidden">
-                <img 
-                  src="https://placehold.co/400x200/e6f7ff/0070cc?text=T-Shirt" 
-                  alt="Community T-Shirt" 
-                  className="w-full h-full object-cover"
-                />
+            {merchandiseLoading ? (
+              <div className="p-4 text-center">
+                <div className="animate-spin h-5 w-5 border-2 border-[#008CFF] border-t-transparent rounded-full mx-auto mb-2"></div>
+                <p className="text-xs text-zinc-500">Loading merchandise...</p>
               </div>
-              <div className="text-sm font-medium mb-1">Limited Edition T-Shirt</div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-zinc-600">500 POINTS</span>
-                <button className="text-xs bg-[#008CFF] text-white px-2 py-1 rounded hover:bg-[#0070CC]">
-                  Redeem
-                </button>
+            ) : merchandise.length > 0 ? (
+              merchandise.map((item) => (
+                <div key={item.id} className="bg-white border border-gray-200 rounded-md p-3">
+                  <div className="h-20 bg-gray-100 rounded-md mb-2 overflow-hidden">
+                    <img 
+                      src={item.imageUrl} 
+                      alt={item.name} 
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                  <div className="text-sm font-medium mb-1">{item.name}</div>
+                  {item.description && <div className="text-xs text-zinc-600 mb-2">{item.description}</div>}
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-zinc-600">{item.pointsCost} POINTS</span>
+                    <button 
+                      onClick={() => handleRedeem(item)} 
+                      className="text-xs bg-[#008CFF] text-white px-2 py-1 rounded hover:bg-[#0070CC]"
+                    >
+                      Redeem
+                    </button>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="bg-gray-50 p-4 text-center rounded-md">
+                <p className="text-sm text-zinc-500">No items are available to redeem yet.</p>
               </div>
-            </div>
-            
-            <div className="bg-white border border-gray-200 rounded-md p-3">
-              <div className="h-20 bg-gray-100 rounded-md mb-2 overflow-hidden">
-                <img 
-                  src="https://placehold.co/400x200/e6f7ff/0070cc?text=NFT" 
-                  alt="Exclusive NFT" 
-                  className="w-full h-full object-cover"
-                />
-              </div>
-              <div className="text-sm font-medium mb-1">Early Supporter Badge</div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-zinc-600">1000 POINTS</span>
-                <button className="text-xs bg-[#008CFF] text-white px-2 py-1 rounded hover:bg-[#0070CC]">
-                  Redeem
-                </button>
-              </div>
-            </div>
+            )}
           </div>
         </div>
         
@@ -748,7 +794,20 @@ export default function ChatRoom() {
                     <img src={message.senderAvatar} alt="Avatar" className="w-full h-full object-cover" />
                   ) : (
                     <div className={`w-full h-full flex items-center justify-center ${message.isCreator ? 'bg-[#008CFF]' : 'bg-gray-200'} ${message.isCreator ? 'text-white' : 'text-zinc-600'}`}>
-                      {message.senderName?.[0] || '?'}
+                      <img 
+                        src={`https://api.dicebear.com/7.x/identicon/svg?seed=${message.senderAddress}`}
+                        alt="Default Avatar" 
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          // Fallback to initials if the default avatar fails to load
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = 'none';
+                          const parent = target.parentElement;
+                          if (parent) {
+                            parent.textContent = message.senderName?.[0] || '?';
+                          }
+                        }}
+                      />
                     </div>
                   )}
                 </div>
@@ -846,31 +905,55 @@ export default function ChatRoom() {
         <div className="text-xs uppercase text-zinc-500 font-medium mb-4">
           Members — {members.length}
         </div>
-        <div className="space-y-2">
-          {members.map((member) => {
-            const isCreator = community?.creatorAddress?.toLowerCase() === member.walletAddress.toLowerCase();
-            return (
-              <div key={member.id} className="flex items-center">
-                <div className="w-8 h-8 rounded-full bg-gray-100 flex-shrink-0 overflow-hidden mr-2">
-                  {member.avatarUrl ? (
-                    <img src={member.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className={`w-full h-full flex items-center justify-center ${isCreator ? 'bg-[#008CFF]' : 'bg-gray-200'} ${isCreator ? 'text-white' : 'text-zinc-600'}`}>
-                      {member.displayName?.[0] || member.walletAddress[0]}
-                    </div>
-                  )}
-                </div>
-                <div className="flex items-center">
-                  <div className="text-sm">
-                    {member.displayName || member.walletAddress.substring(0, 6) + '...'}
+        <div className="space-y-2 max-h-[calc(100vh-120px)] overflow-y-auto pr-1">
+          {members.length === 0 ? (
+            <div className="text-sm text-zinc-500 text-center py-4">
+              No members found
+            </div>
+          ) : (
+            members.map((member) => {
+              const isCreator = community?.creatorAddress?.toLowerCase() === member.walletAddress.toLowerCase();
+              return (
+                <div key={member.id} className="flex items-center bg-white hover:bg-gray-100 rounded-md p-2 transition-colors">
+                  <div className="w-8 h-8 rounded-full bg-gray-100 flex-shrink-0 overflow-hidden mr-2">
+                    {member.avatarUrl ? (
+                      <img src={member.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                    ) : (
+                      <div className={`w-full h-full flex items-center justify-center ${isCreator ? 'bg-[#008CFF]' : 'bg-gray-200'} ${isCreator ? 'text-white' : 'text-zinc-600'}`}>
+                        <img 
+                          src={`https://api.dicebear.com/7.x/identicon/svg?seed=${member.walletAddress}`}
+                          alt="Default Avatar" 
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            // Fallback to initials if the default avatar fails to load
+                            const target = e.target as HTMLImageElement;
+                            target.style.display = 'none';
+                            const parent = target.parentElement;
+                            if (parent) {
+                              parent.textContent = member.displayName?.[0] || member.walletAddress[0] || '?';
+                            }
+                          }}
+                        />
+                      </div>
+                    )}
                   </div>
-                  {isCreator && (
-                    <span className="ml-2 text-xs bg-blue-50 text-[#008CFF] px-1.5 py-0.5 rounded">Creator</span>
-                  )}
+                  <div className="flex flex-col overflow-hidden">
+                    <div className="flex items-center">
+                      <div className="text-sm font-medium truncate">
+                        {member.displayName || member.walletAddress.substring(0, 6) + '...'}
+                      </div>
+                      {isCreator && (
+                        <span className="ml-2 text-xs bg-blue-50 text-[#008CFF] px-1.5 py-0.5 rounded">Creator</span>
+                      )}
+                    </div>
+                    <div className="text-xs text-zinc-500 truncate">
+                      Joined: {new Date(member.joinedAt).toLocaleDateString()}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })
+          )}
         </div>
       </div>
 
@@ -900,6 +983,21 @@ export default function ChatRoom() {
               >
                 Set Up My Profile
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Redemption toast notification */}
+      {redeemMsg && redeemMsg.show && (
+        <div className="fixed bottom-5 right-5 bg-[#008CFF] text-white px-4 py-3 rounded-md shadow-lg animate-fadeIn">
+          <div className="flex items-center">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+            </svg>
+            <div>
+              <p className="font-medium">Coming Soon!</p>
+              <p className="text-sm opacity-90">Redemption for {redeemMsg.item} will be available soon.</p>
             </div>
           </div>
         </div>
