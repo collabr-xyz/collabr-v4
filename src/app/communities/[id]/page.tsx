@@ -16,7 +16,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, getDocs, addDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { ConnectButton, useActiveAccount, useSendTransaction } from "thirdweb/react";
 import { client } from "../../client";
@@ -528,6 +528,20 @@ export default function CommunityDetail() {
         // Success!
         setPurchaseError(null);
         setPurchaseStatus('success');
+        
+        // Add member to Firestore database for chat functionality
+        try {
+          await addDoc(collection(db, "members"), {
+            communityId,
+            walletAddress: activeAccount.address,
+            displayName: activeAccount.address.substring(0, 6) + '...',
+            joinedAt: new Date().toISOString()
+          });
+          console.log("Member added to Firestore for chat functionality");
+        } catch (memberError) {
+          console.error("Error adding member to Firestore:", memberError);
+          // We don't want to revert the successful purchase if this fails
+        }
         
         // Refresh the member count after successful purchase
         try {

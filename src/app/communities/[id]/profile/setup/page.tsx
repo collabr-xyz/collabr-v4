@@ -138,23 +138,29 @@ export default function ProfileSetup() {
     try {
       const profileRef = doc(db, "communities", communityId, "profiles", activeAccount.address);
       
-      // Merge with existing profile data if it exists
+      // Ensure isProfileComplete is explicitly set to true
       const profileToSave: CommunityProfile = {
         userId: activeAccount.address,
         communityId: communityId,
         displayName: profileData.displayName || activeAccount.address.slice(0, 6) + '...' + activeAccount.address.slice(-4),
         joinedAt: communityProfile?.joinedAt || serverTimestamp(),
-        isProfileComplete: true,
-        ...communityProfile,
+        isProfileComplete: true, // Explicitly set to true
+        bio: profileData.bio || "",
+        avatar: profileData.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${activeAccount.address}`,
+        socialLinks: profileData.socialLinks || {},
+        // Preserve any existing fields
+        ...(communityProfile || {}),
+        // But override with new values
         ...profileData,
       };
       
-      // Update or create profile
-      if (communityProfile) {
-        await updateDoc(profileRef, profileToSave as { [x: string]: any });
-      } else {
-        await setDoc(profileRef, profileToSave as { [x: string]: any });
-      }
+      // Make sure isProfileComplete wasn't overridden
+      profileToSave.isProfileComplete = true;
+      
+      console.log("Saving profile with isProfileComplete=true:", profileToSave);
+      
+      // Use set with merge option instead of updateDoc to ensure all fields are saved properly
+      await setDoc(profileRef, profileToSave as { [x: string]: any }, { merge: true });
       
       // Update local state
       setCommunityProfile(profileToSave);
@@ -164,28 +170,6 @@ export default function ProfileSetup() {
     } catch (error) {
       console.error("Error saving profile:", error);
       setErrorMessage("Failed to save profile. Please try again.");
-    }
-  };
-
-  // Skip profile setup
-  const handleSkipProfileSetup = () => {
-    // Create a minimal profile record to mark that they've joined
-    if (activeAccount && communityId) {
-      const profileRef = doc(db, "communities", communityId, "profiles", activeAccount.address);
-      setDoc(profileRef, {
-        userId: activeAccount.address,
-        communityId: communityId,
-        displayName: activeAccount.address.slice(0, 6) + '...' + activeAccount.address.slice(-4),
-        joinedAt: serverTimestamp(),
-        isProfileComplete: false
-      } as { [x: string]: any })
-        .then(() => {
-          router.push(`/communities/${communityId}/room`);
-        })
-        .catch(error => {
-          console.error("Error creating minimal profile:", error);
-          setErrorMessage("Failed to skip profile setup. Please try again.");
-        });
     }
   };
 
@@ -229,12 +213,14 @@ export default function ProfileSetup() {
               {community?.name ? `for ${community.name}` : ''}
             </p>
           </div>
-          <Link 
-            href={`/communities/${communityId}/room`} 
-            className="text-sm text-zinc-500 hover:text-zinc-800 transition"
-          >
-            Back to Community
-          </Link>
+          {isEditMode && (
+            <Link 
+              href={`/communities/${communityId}/room`} 
+              className="text-sm text-zinc-500 hover:text-zinc-800 transition"
+            >
+              Back to Community
+            </Link>
+          )}
         </div>
 
         {errorMessage && (
@@ -252,6 +238,17 @@ export default function ProfileSetup() {
                 : "Set up your profile for this community. This profile will only be visible within this community."
             }
           </div>
+          
+          {!isEditMode && (
+            <div className="bg-yellow-50 text-yellow-800 p-4 rounded-md mb-6 text-sm flex items-start">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 mt-0.5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+              </svg>
+              <div>
+                <strong>Profile Required:</strong> You must complete your profile before you can participate in this community. This helps build trust and recognition among community members.
+              </div>
+            </div>
+          )}
           
           <form onSubmit={(e) => {
             e.preventDefault();
@@ -296,7 +293,7 @@ export default function ProfileSetup() {
                 name="displayName"
                 defaultValue={communityProfile?.displayName || ''}
                 placeholder={activeAccount.address.slice(0, 6) + '...' + activeAccount.address.slice(-4)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
                 required
               />
             </div>
@@ -311,7 +308,7 @@ export default function ProfileSetup() {
                 rows={3}
                 defaultValue={communityProfile?.bio || ''}
                 placeholder="Tell others about yourself..."
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
               />
             </div>
             
@@ -437,7 +434,7 @@ export default function ProfileSetup() {
                       name="twitter"
                       defaultValue={communityProfile?.socialLinks?.twitter || ''}
                       placeholder="username"
-                      className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-r-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-r-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
                     />
                   </div>
                 </div>
@@ -452,7 +449,7 @@ export default function ProfileSetup() {
                     name="discord"
                     defaultValue={communityProfile?.socialLinks?.discord || ''}
                     placeholder="username#0000"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
                   />
                 </div>
                 
@@ -470,7 +467,7 @@ export default function ProfileSetup() {
                       name="telegram"
                       defaultValue={communityProfile?.socialLinks?.telegram || ''}
                       placeholder="username"
-                      className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-r-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-r-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
                     />
                   </div>
                 </div>
@@ -485,25 +482,16 @@ export default function ProfileSetup() {
                     name="website"
                     defaultValue={communityProfile?.socialLinks?.website || ''}
                     placeholder="https://example.com"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
                   />
                 </div>
               </div>
             </div>
             
             <div className="flex justify-between pt-5 border-t border-gray-200">
-              {!isEditMode && (
-                <button
-                  type="button"
-                  onClick={handleSkipProfileSetup}
-                  className="text-gray-500 hover:text-gray-700 text-sm"
-                >
-                  Skip for now
-                </button>
-              )}
               <button
                 type="submit"
-                className="ml-auto px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                className="w-full px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
               >
                 {isEditMode ? 'Update Profile' : 'Create Profile'}
               </button>
