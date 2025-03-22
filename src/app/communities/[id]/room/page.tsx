@@ -201,6 +201,29 @@ export default function ChatRoom() {
     }
   };
   
+  // Force refresh of avatars - useful when debugging avatar issues
+  const forceRefreshAvatars = () => {
+    console.log("Force refreshing avatars...");
+    refreshMembers();
+    
+    // Also attempt to reload any broken avatar images
+    setTimeout(() => {
+      const avatarImages = document.querySelectorAll('img[alt="Avatar"]');
+      console.log(`Found ${avatarImages.length} avatar images to refresh`);
+      
+      avatarImages.forEach((img, index) => {
+        const imgElement = img as HTMLImageElement;
+        const currentSrc = imgElement.src;
+        
+        // Only refresh URLs that aren't the default avatars
+        if (!currentSrc.includes('dicebear')) {
+          console.log(`Refreshing avatar image ${index + 1}:`, currentSrc);
+          imgElement.src = `${currentSrc}?t=${Date.now()}`;
+        }
+      });
+    }, 1000);
+  };
+  
   // Check if user has completed a profile for this community
   useEffect(() => {
     if (!activeAccount?.address || !communityId || userStatus !== 'member' || profileChecked) {
@@ -637,12 +660,20 @@ export default function ChatRoom() {
         
         if (profileSnapshot.exists()) {
           const profileData = profileSnapshot.data();
+          console.log("Profile data for sender:", profileData);
+          
           if (profileData.displayName) {
             senderName = profileData.displayName;
+            console.log("Using display name from profile:", senderName);
           }
           if (profileData.avatar) {
             senderAvatar = profileData.avatar;
+            console.log("Using avatar from profile:", senderAvatar);
+          } else {
+            console.log("No avatar found in profile, using fallback");
           }
+        } else {
+          console.log("No profile found for sender");
         }
       } catch (err) {
         console.error("Error getting sender profile:", err);
@@ -955,7 +986,19 @@ export default function ChatRoom() {
               <div key={message.id} className="flex items-start group">
                 <div className="w-10 h-10 rounded-full bg-gray-100 flex-shrink-0 overflow-hidden mr-3">
                   {message.senderAvatar ? (
-                    <img src={message.senderAvatar} alt="Avatar" className="w-full h-full object-cover" />
+                    <img 
+                      src={message.senderAvatar} 
+                      alt="Avatar" 
+                      className="w-full h-full object-cover" 
+                      onLoad={() => console.log("Avatar loaded successfully:", message.senderAvatar)}
+                      onError={(e) => {
+                        console.error("Failed to load avatar image:", message.senderAvatar);
+                        // Fall back to default avatar
+                        const target = e.target as HTMLImageElement;
+                        target.onerror = null; // Prevent infinite error loop
+                        target.src = `https://api.dicebear.com/7.x/identicon/svg?seed=${message.senderAddress}`;
+                      }}
+                    />
                   ) : (
                     <div className={`w-full h-full flex items-center justify-center ${message.isCreator ? 'bg-[#008CFF]' : 'bg-gray-200'} ${message.isCreator ? 'text-white' : 'text-zinc-600'}`}>
                       <img 
@@ -1092,16 +1135,28 @@ export default function ChatRoom() {
           <div className="text-xs uppercase text-zinc-500 font-medium">
             Members — {members.length}
           </div>
-          <button 
-            onClick={() => refreshMembers()}
-            className="text-xs text-zinc-500 hover:text-[#008CFF] flex items-center"
-            title="Refresh member list"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
-            </svg>
-            Refresh
-          </button>
+          <div className="flex space-x-2">
+            <button 
+              onClick={() => refreshMembers()}
+              className="text-xs text-zinc-500 hover:text-[#008CFF] flex items-center"
+              title="Refresh member list"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+              </svg>
+              <span>List</span>
+            </button>
+            <button 
+              onClick={() => forceRefreshAvatars()}
+              className="text-xs text-zinc-500 hover:text-[#008CFF] flex items-center"
+              title="Refresh avatars"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.5-9c0-.276-.224-.5-.5-.5s-.5.224-.5.5h1zm0 3.5c0 .276-.224.5-.5.5s-.5-.224-.5-.5h1zm-1-7c0-.276.224-.5.5-.5s.5.224.5.5h-1zm1.5.5A.5.5 0 0010 6a.5.5 0 00-.5.5h1zm-2 0a.5.5 0 00.5-.5.5.5 0 00-.5-.5v1zm3 0a.5.5 0 00-.5-.5.5.5 0 00-.5.5h1zm-2.5-2a.5.5 0 00-.5.5.5.5 0 00.5.5V4zM7 8a.5.5 0 00.5.5.5.5 0 00.5-.5H7zm0 0a.5.5 0 00.5-.5.5.5 0 00-.5-.5v1zm3 0a.5.5 0 00-.5-.5.5.5 0 00-.5.5h1zm-5.5-3a.5.5 0 01.5-.5h3a.5.5 0 010 1H5a.5.5 0 01-.5-.5zm5.5 0a.5.5 0 01.5-.5h3a.5.5 0 010 1h-3a.5.5 0 01-.5-.5z" />
+              </svg>
+              <span>Avatars</span>
+            </button>
+          </div>
         </div>
         <div className="space-y-2 max-h-[calc(100vh-120px)] overflow-y-auto pr-1">
           {members.length === 0 ? (
@@ -1115,7 +1170,19 @@ export default function ChatRoom() {
                 <div key={member.id} className="flex items-center bg-white hover:bg-gray-100 rounded-md p-2 transition-colors">
                   <div className="w-8 h-8 rounded-full bg-gray-100 flex-shrink-0 overflow-hidden mr-2">
                     {member.avatarUrl ? (
-                      <img src={member.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                      <img 
+                        src={member.avatarUrl} 
+                        alt="Avatar" 
+                        className="w-full h-full object-cover" 
+                        onLoad={() => console.log("Avatar loaded successfully:", member.avatarUrl)}
+                        onError={(e) => {
+                          console.error("Failed to load avatar image:", member.avatarUrl);
+                          // Fall back to default avatar
+                          const target = e.target as HTMLImageElement;
+                          target.onerror = null; // Prevent infinite error loop
+                          target.src = `https://api.dicebear.com/7.x/identicon/svg?seed=${member.walletAddress}`;
+                        }}
+                      />
                     ) : (
                       <div className={`w-full h-full flex items-center justify-center ${isCreator ? 'bg-[#008CFF]' : 'bg-gray-200'} ${isCreator ? 'text-white' : 'text-zinc-600'}`}>
                         <img 
