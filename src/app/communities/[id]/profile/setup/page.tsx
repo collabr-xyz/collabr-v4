@@ -62,6 +62,15 @@ export default function ProfileSetup() {
     async function fetchData() {
       setIsLoading(true);
       try {
+        // Check if we're in edit mode from the room page
+        const isFromRoomEdit = sessionStorage.getItem('profileEditMode') === 'true';
+        if (isFromRoomEdit) {
+          console.log("Detected edit mode from chat room");
+          setIsEditMode(true);
+          // Clear the flag
+          sessionStorage.removeItem('profileEditMode');
+        }
+        
         // Fetch community data
         const communityRef = doc(db, "communities", communityId);
         const communitySnapshot = await getDoc(communityRef);

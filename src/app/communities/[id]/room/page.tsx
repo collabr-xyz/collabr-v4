@@ -1158,7 +1158,87 @@ export default function ChatRoom() {
             </button>
           </div>
         </div>
-        <div className="space-y-2 max-h-[calc(100vh-120px)] overflow-y-auto pr-1">
+
+        {/* Current user profile card */}
+        {activeAccount?.address && userStatus === 'member' && (
+          <div className="bg-white rounded-md p-3 mb-4 border border-gray-200">
+            <div className="flex items-center">
+              {/* Get current user info from members */}
+              {(() => {
+                const currentMember = members.find(m => 
+                  m.walletAddress.toLowerCase() === activeAccount.address.toLowerCase()
+                );
+                const isCreator = community?.creatorAddress?.toLowerCase() === activeAccount.address.toLowerCase();
+                
+                return (
+                  <>
+                    <div className="w-10 h-10 rounded-full bg-gray-100 flex-shrink-0 overflow-hidden mr-3">
+                      {currentMember?.avatarUrl ? (
+                        <img 
+                          src={currentMember.avatarUrl} 
+                          alt="Your Avatar" 
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            target.onerror = null;
+                            target.src = `https://api.dicebear.com/7.x/identicon/svg?seed=${activeAccount.address}`;
+                          }}
+                        />
+                      ) : (
+                        <div className={`w-full h-full flex items-center justify-center ${isCreator ? 'bg-[#008CFF]' : 'bg-gray-200'} ${isCreator ? 'text-white' : 'text-zinc-600'}`}>
+                          <img 
+                            src={`https://api.dicebear.com/7.x/identicon/svg?seed=${activeAccount.address}`}
+                            alt="Default Avatar" 
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              const target = e.target as HTMLImageElement;
+                              target.style.display = 'none';
+                              const parent = target.parentElement;
+                              if (parent) {
+                                parent.textContent = currentMember?.displayName?.[0] || activeAccount.address[0] || '?';
+                              }
+                            }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <div className="font-medium">
+                        {currentMember?.displayName || activeAccount.address.substring(0, 6) + '...'}
+                        {isCreator && (
+                          <span className="ml-2 text-xs bg-blue-50 text-[#008CFF] px-1.5 py-0.5 rounded">Host</span>
+                        )}
+                      </div>
+                      <div className="text-xs text-zinc-500 mt-1">You</div>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+            
+            <div className="mt-3 text-center">
+              <button
+                onClick={() => {
+                  // Set flag to indicate edit mode and return to chat
+                  sessionStorage.setItem('profileEditMode', 'true');
+                  sessionStorage.setItem('returnedFromProfileSetup', communityId);
+                  router.push(`/communities/${communityId}/profile/setup`);
+                }}
+                className="w-full text-xs py-1.5 bg-gray-100 text-zinc-700 hover:bg-gray-200 rounded transition flex items-center justify-center"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                </svg>
+                Edit Profile
+              </button>
+            </div>
+          </div>
+        )}
+        
+        <div className="text-xs uppercase text-zinc-500 font-medium mb-2">
+          Community Members
+        </div>
+        <div className="space-y-2 max-h-[calc(100vh-220px)] overflow-y-auto pr-1">{/* Adjust height to account for profile card */}
           {members.length === 0 ? (
             <div className="text-sm text-zinc-500 text-center py-4">
               No members found
