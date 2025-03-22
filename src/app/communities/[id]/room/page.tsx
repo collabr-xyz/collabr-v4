@@ -164,6 +164,7 @@ export default function ChatRoom() {
             }
             if (profileData.avatar) {
               member.avatarUrl = profileData.avatar;
+              console.log(`Updated avatar for ${walletAddress}: ${profileData.avatar}`);
             }
           }
           
@@ -202,13 +203,6 @@ export default function ChatRoom() {
   
   // Check if user has completed a profile for this community
   useEffect(() => {
-    // Skip profile check if user is the creator
-    const isCreator = community?.creatorAddress?.toLowerCase() === activeAccount?.address?.toLowerCase();
-    if (isCreator) {
-      setProfileChecked(true);
-      return;
-    }
-    
     if (!activeAccount?.address || !communityId || userStatus !== 'member' || profileChecked) {
       return;
     }
@@ -384,6 +378,7 @@ export default function ChatRoom() {
               }
               if (profileData.avatar) {
                 member.avatarUrl = profileData.avatar;
+                console.log(`Set avatar for ${walletAddress} from profile`);
               }
             }
             
@@ -600,8 +595,7 @@ export default function ChatRoom() {
     const isCreator = community?.creatorAddress?.toLowerCase() === activeAccount?.address?.toLowerCase();
     
     // Check if profile has been checked yet, and force a profile check if not
-    // Skip this check for community creators
-    if (!isCreator && !profileChecked && activeAccount?.address && userStatus === 'member') {
+    if (!profileChecked && activeAccount?.address && userStatus === 'member') {
       // If profile hasn't been checked yet, force a check before sending
       const profileRef = doc(db, "communities", communityId, "profiles", activeAccount?.address || "");
       try {
@@ -1056,8 +1050,8 @@ export default function ChatRoom() {
                 const isCreator = community?.creatorAddress?.toLowerCase() === activeAccount?.address?.toLowerCase();
                 
                 // If this is the first time they're typing and profile hasn't been checked
-                // Skip this check for community creators
-                if (!isCreator && !profileChecked && activeAccount?.address && userStatus === 'member' && !showProfileModal) {
+                // Remove isCreator check to require profile for all users
+                if (!profileChecked && activeAccount?.address && userStatus === 'member' && !showProfileModal) {
                   // Show the profile completion modal
                   const checkProfileCompletion = async () => {
                     const profileRef = doc(db, "communities", communityId, "profiles", activeAccount?.address || "");
