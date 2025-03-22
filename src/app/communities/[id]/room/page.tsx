@@ -1209,7 +1209,6 @@ export default function ChatRoom() {
                           <span className="ml-2 text-xs bg-blue-50 text-[#008CFF] px-1.5 py-0.5 rounded">Host</span>
                         )}
                       </div>
-                      <div className="text-xs text-zinc-500 mt-1">You</div>
                     </div>
                   </>
                 );
