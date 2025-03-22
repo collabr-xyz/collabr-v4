@@ -109,8 +109,106 @@ export default function ChatRoom() {
     }
   }, []);
   
+  // Function to refresh members list - moved before any useEffect that references it
+  const refreshMembers = async () => {
+    if (!communityId) return;
+    
+    try {
+      console.log("Refreshing members list after profile update");
+      // Create a Map to ensure unique members by wallet address
+      const membersMap = new Map<string, Member>();
+      
+      // 1. First fetch from Firestore database
+      const q = query(collection(db, "members"), where("communityId", "==", communityId));
+      const querySnapshot = await getDocs(q);
+      
+      querySnapshot.docs.forEach(doc => {
+        const memberData = doc.data();
+        const walletAddress = memberData.walletAddress.toLowerCase();
+        membersMap.set(walletAddress, {
+          id: doc.id,
+          walletAddress: walletAddress, // Normalize wallet address
+          displayName: memberData.displayName,
+          avatarUrl: memberData.avatarUrl,
+          joinedAt: memberData.joinedAt
+        });
+      });
+      
+      // 2. Ensure creator is included - but don't set a default displayName
+      // so it can be overridden by profile data
+      if (community?.creatorAddress) {
+        const creatorAddress = community.creatorAddress.toLowerCase();
+        if (!membersMap.has(creatorAddress)) {
+          membersMap.set(creatorAddress, {
+            id: 'creator',
+            walletAddress: creatorAddress,
+            // Don't set displayName here, will be set from profile or fallback later
+            joinedAt: community.createdAt || new Date().toISOString()
+          });
+        }
+      }
+      
+      // 3. Always fetch fresh profile data for each member (don't rely on cached data)
+      console.log("Fetching latest profile data for all members...");
+      const profilePromises = Array.from(membersMap.entries()).map(async ([walletAddress, member]) => {
+        try {
+          // Always get fresh profile data from Firestore
+          const profileRef = doc(db, "communities", communityId, "profiles", walletAddress);
+          const profileSnapshot = await getDoc(profileRef);
+          
+          if (profileSnapshot.exists()) {
+            const profileData = profileSnapshot.data();
+            if (profileData.displayName) {
+              member.displayName = profileData.displayName;
+              console.log(`Updated display name for ${walletAddress}: ${profileData.displayName}`);
+            }
+            if (profileData.avatar) {
+              member.avatarUrl = profileData.avatar;
+            }
+          }
+          
+          // If this is the creator and they don't have a profile name, use "Creator" as fallback
+          if (community?.creatorAddress?.toLowerCase() === walletAddress && !member.displayName) {
+            member.displayName = walletAddress;
+            console.log(`Using fallback name "Creator" for community creator: ${walletAddress}`);
+          }
+          
+          return member;
+        } catch (err) {
+          console.error(`Error fetching profile for member ${walletAddress}:`, err);
+          
+          // Still set creator fallback name if needed
+          if (community?.creatorAddress?.toLowerCase() === walletAddress && !member.displayName) {
+            member.displayName = "Creator";
+          }
+          
+          return member; // Return original member if there's an error
+        }
+      });
+      
+      // Wait for all profile fetches to complete
+      await Promise.all(profilePromises);
+      
+      // Convert Map to array
+      const updatedMembersData = Array.from(membersMap.values());
+      console.log(`Updated member count: ${updatedMembersData.length}`);
+      
+      // Force UI update by creating a new array
+      setMembers([...updatedMembersData]);
+    } catch (err) {
+      console.error("Error refreshing members:", err);
+    }
+  };
+  
   // Check if user has completed a profile for this community
   useEffect(() => {
+    // Skip profile check if user is the creator
+    const isCreator = community?.creatorAddress?.toLowerCase() === activeAccount?.address?.toLowerCase();
+    if (isCreator) {
+      setProfileChecked(true);
+      return;
+    }
+    
     if (!activeAccount?.address || !communityId || userStatus !== 'member' || profileChecked) {
       return;
     }
@@ -131,6 +229,8 @@ export default function ChatRoom() {
           if (profileData.isProfileComplete === true) {
             console.log("Profile is complete, user can access chat");
             setProfileChecked(true);
+            // Refresh members list to include updated profile
+            refreshMembers();
             return; // Exit early if profile is complete
           } else {
             console.log("Profile exists but is not complete:", profileData.isProfileComplete);
@@ -140,8 +240,8 @@ export default function ChatRoom() {
         }
         
         // If we reach here, the profile either doesn't exist or is not complete
-        console.log("Redirecting to profile setup page");
-        router.push(`/communities/${communityId}/profile/setup`);
+        console.log("Showing profile completion modal");
+        setShowProfileModal(true);
         
         setProfileChecked(true);
       } catch (err) {
@@ -157,7 +257,26 @@ export default function ChatRoom() {
     }, 500);
     
     return () => clearTimeout(timerId);
-  }, [activeAccount?.address, communityId, userStatus, profileChecked, router]);
+  }, [activeAccount?.address, communityId, userStatus, profileChecked, router, refreshMembers]);
+  
+  // New effect to check if we're returning from profile setup
+  useEffect(() => {
+    // Use sessionStorage to check if we just returned from profile setup
+    const returnedFromSetup = sessionStorage.getItem('returnedFromProfileSetup');
+    
+    if (returnedFromSetup === communityId && userStatus === 'member' && activeAccount?.address) {
+      console.log("Detected return from profile setup, refreshing profile status");
+      
+      // Remove the flag
+      sessionStorage.removeItem('returnedFromProfileSetup');
+      
+      // Reset profile check state
+      setProfileChecked(false);
+      
+      // Refresh the members list
+      refreshMembers();
+    }
+  }, [userStatus, communityId, activeAccount?.address, refreshMembers]);
   
   // Automatically redirect if user clicks outside the modal
   useEffect(() => {
@@ -183,6 +302,15 @@ export default function ChatRoom() {
   
   // Handle profile redirection
   const handleProfileSetup = () => {
+    // First close the modal
+    setShowProfileModal(false);
+    
+    // Set flag to detect returning from profile setup
+    // This flag will be checked when the user returns to this page
+    sessionStorage.setItem('returnedFromProfileSetup', communityId);
+    console.log("Setting returnedFromProfileSetup flag:", communityId);
+    
+    // Then redirect to profile setup
     router.push(`/communities/${communityId}/profile/setup`);
   };
 
@@ -238,7 +366,6 @@ export default function ChatRoom() {
             membersMap.set(creatorAddress, {
               id: 'creator',
               walletAddress: creatorAddress,
-              displayName: 'Creator',
               joinedAt: community.createdAt || new Date().toISOString()
             });
           }
@@ -259,9 +386,19 @@ export default function ChatRoom() {
                 member.avatarUrl = profileData.avatar;
               }
             }
+            
+            // If this is the creator and they don't have a profile name, use "Creator" as fallback
+            if (community?.creatorAddress?.toLowerCase() === walletAddress && !member.displayName) {
+              member.displayName = "Creator";
+            }
           } catch (err) {
             console.error(`Error fetching profile for member ${walletAddress}:`, err);
             // Continue with existing member data
+            
+            // Still set creator fallback name if needed
+            if (community?.creatorAddress?.toLowerCase() === walletAddress && !member.displayName) {
+              member.displayName = "Creator";
+            }
           }
         }
         
@@ -291,6 +428,9 @@ export default function ChatRoom() {
           console.log("No active account, can't determine membership");
           setUserStatus('nonmember');
         }
+        
+        // Schedule a refresh to ensure we have the latest profile data
+        setTimeout(() => refreshMembers(), 1000);
       } catch (err) {
         console.error("Error fetching members:", err);
         setUserStatus('nonmember');
@@ -455,6 +595,28 @@ export default function ChatRoom() {
   
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Check if current user is the creator
+    const isCreator = community?.creatorAddress?.toLowerCase() === activeAccount?.address?.toLowerCase();
+    
+    // Check if profile has been checked yet, and force a profile check if not
+    // Skip this check for community creators
+    if (!isCreator && !profileChecked && activeAccount?.address && userStatus === 'member') {
+      // If profile hasn't been checked yet, force a check before sending
+      const profileRef = doc(db, "communities", communityId, "profiles", activeAccount?.address || "");
+      try {
+        const profileSnapshot = await getDoc(profileRef);
+        if (!profileSnapshot.exists() || !profileSnapshot.data().isProfileComplete) {
+          setShowProfileModal(true);
+          return;
+        }
+        setProfileChecked(true);
+      } catch (err) {
+        console.error("Error checking profile before sending message:", err);
+        // Continue with sending attempt
+      }
+    }
+    
     if (!newMessage.trim() || !activeAccount?.address || userStatus !== 'member') return;
     
     setMessageError(null);
@@ -584,6 +746,14 @@ export default function ChatRoom() {
     
     console.log(`Attempted to redeem ${item.name} for ${item.pointsCost} points`);
   };
+  
+  // Additional effect to refresh members list when profile status changes
+  useEffect(() => {
+    if (profileChecked && userStatus === 'member' && activeAccount?.address) {
+      console.log("Profile check completed, refreshing members list to update names");
+      refreshMembers();
+    }
+  }, [profileChecked, userStatus, activeAccount?.address, communityId]);
   
   if (error) {
     return (
@@ -816,9 +986,6 @@ export default function ChatRoom() {
                     <span className={`font-medium ${message.isCreator ? 'text-[#008CFF]' : 'text-zinc-900'}`}>
                       {message.senderName || message.senderAddress.substring(0, 6) + '...'}
                     </span>
-                    {message.isCreator && (
-                      <span className="ml-2 text-xs bg-blue-50 text-[#008CFF] px-1.5 py-0.5 rounded">Creator</span>
-                    )}
                     <span className="ml-2 text-xs text-zinc-400">
                       {message.timestamp?.toDate ? 
                         message.timestamp.toDate().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 
@@ -884,7 +1051,32 @@ export default function ChatRoom() {
             <input
               type="text"
               value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
+              onChange={(e) => {
+                // Check if current user is the creator
+                const isCreator = community?.creatorAddress?.toLowerCase() === activeAccount?.address?.toLowerCase();
+                
+                // If this is the first time they're typing and profile hasn't been checked
+                // Skip this check for community creators
+                if (!isCreator && !profileChecked && activeAccount?.address && userStatus === 'member' && !showProfileModal) {
+                  // Show the profile completion modal
+                  const checkProfileCompletion = async () => {
+                    const profileRef = doc(db, "communities", communityId, "profiles", activeAccount?.address || "");
+                    try {
+                      const profileSnapshot = await getDoc(profileRef);
+                      if (!profileSnapshot.exists() || !profileSnapshot.data().isProfileComplete) {
+                        setShowProfileModal(true);
+                        return;
+                      }
+                      setProfileChecked(true);
+                    } catch (err) {
+                      console.error("Error checking profile when typing:", err);
+                    }
+                  };
+                  checkProfileCompletion();
+                }
+                
+                setNewMessage(e.target.value);
+              }}
               placeholder={replyingTo ? "Type your reply..." : "Type a message..."}
               className="flex-1 px-4 py-2 bg-white text-zinc-900 focus:outline-none"
               disabled={sendingMessage}
@@ -902,8 +1094,20 @@ export default function ChatRoom() {
       
       {/* Member list sidebar - Right */}
       <div className="w-64 bg-gray-50 p-4 border-l border-gray-200">
-        <div className="text-xs uppercase text-zinc-500 font-medium mb-4">
-          Members — {members.length}
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-xs uppercase text-zinc-500 font-medium">
+            Members — {members.length}
+          </div>
+          <button 
+            onClick={() => refreshMembers()}
+            className="text-xs text-zinc-500 hover:text-[#008CFF] flex items-center"
+            title="Refresh member list"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+            </svg>
+            Refresh
+          </button>
         </div>
         <div className="space-y-2 max-h-[calc(100vh-120px)] overflow-y-auto pr-1">
           {members.length === 0 ? (
@@ -940,10 +1144,16 @@ export default function ChatRoom() {
                   <div className="flex flex-col overflow-hidden">
                     <div className="flex items-center">
                       <div className="text-sm font-medium truncate">
-                        {member.displayName || member.walletAddress.substring(0, 6) + '...'}
+                        {member.displayName ? (
+                          // Show profile name with a special style
+                          <span className="text-[#008CFF]">{member.displayName}</span>
+                        ) : (
+                          // Default to wallet address if no profile name
+                          member.walletAddress.substring(0, 6) + '...'
+                        )}
                       </div>
                       {isCreator && (
-                        <span className="ml-2 text-xs bg-blue-50 text-[#008CFF] px-1.5 py-0.5 rounded">Creator</span>
+                        <span className="ml-2 text-xs bg-blue-50 text-[#008CFF] px-1.5 py-0.5 rounded">Host</span>
                       )}
                     </div>
                     <div className="text-xs text-zinc-500 truncate">
@@ -960,7 +1170,21 @@ export default function ChatRoom() {
       {/* Profile completion modal - outside the flex layout */}
       {showProfileModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
+          <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md relative">
+            <button 
+              onClick={() => {
+                setShowProfileModal(false);
+                // Set flag to detect returning from profile setup
+                sessionStorage.setItem('returnedFromProfileSetup', communityId);
+              }}
+              className="absolute top-3 right-3 text-gray-400 hover:text-gray-600"
+              aria-label="Close modal"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+              </svg>
+            </button>
+            
             <div className="text-center mb-4">
               <h2 className="text-xl font-medium mb-2">Complete Your Profile</h2>
               <p className="text-zinc-600">

@@ -165,6 +165,10 @@ export default function ProfileSetup() {
       // Update local state
       setCommunityProfile(profileToSave);
       
+      // Set flag to indicate profile was just updated
+      sessionStorage.setItem('returnedFromProfileSetup', communityId);
+      console.log('Set returnedFromProfileSetup flag in sessionStorage');
+      
       // Redirect to community room
       router.push(`/communities/${communityId}/room`);
     } catch (error) {
@@ -331,14 +335,6 @@ export default function ProfileSetup() {
                   <label htmlFor="avatarDefault" className="ml-2 block text-sm text-gray-700">
                     Use default avatar
                   </label>
-                  <div className="ml-2 w-10 h-10 rounded-full overflow-hidden">
-                    <Image
-                      src={`https://api.dicebear.com/7.x/identicon/svg?seed=${activeAccount.address}`}
-                      alt="Default avatar"
-                      width={40}
-                      height={40}
-                    />
-                  </div>
                 </div>
                 
                 <div className="flex items-start">

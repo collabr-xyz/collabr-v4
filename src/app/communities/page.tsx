@@ -50,6 +50,9 @@ interface Community {
   userHasMembership?: boolean; // Whether current user has membership
 }
 
+// Define sort options
+type SortOption = 'popular' | 'trending' | 'new' | 'price-low' | 'price-high' | 'members';
+
 // Approved addresses for community creation (same as in communities page)
 const APPROVED_CREATORS = [
   "0xc1C7C9C7A22885e323250e198c5f7374c0C9c5D5", // Example address
@@ -60,6 +63,8 @@ export default function Communities() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0); // Add a refresh key for manual refresh
+  const [sortOption, setSortOption] = useState<SortOption>('popular'); // Default sort option
+  const [showSortMenu, setShowSortMenu] = useState(false); // For dropdown menu
   const activeAccount = useActiveAccount();
   
   // Check if current user is approved to create communities
@@ -178,6 +183,40 @@ export default function Communities() {
     fetchCommunities();
   }, [activeAccount, refreshKey]);
   
+  // Sort communities based on selected option
+  const sortedCommunities = [...communities].sort((a, b) => {
+    switch (sortOption) {
+      case 'popular':
+        // Sort by member count (descending)
+        return (b.memberCount || 0) - (a.memberCount || 0);
+      case 'trending':
+        // For demo purposes, sort by created date (most recent trending)
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      case 'new':
+        // Sort by creation date (newest first)
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      case 'price-low':
+        // Sort by price (lowest first)
+        return a.nftPrice - b.nftPrice;
+      case 'price-high':
+        // Sort by price (highest first)
+        return b.nftPrice - a.nftPrice;
+      case 'members':
+        // Sort by percentage of capacity filled
+        const percentA = (a.memberCount || 0) / a.membershipLimit;
+        const percentB = (b.memberCount || 0) / b.membershipLimit;
+        return percentB - percentA;
+      default:
+        return 0;
+    }
+  });
+
+  // Handle sort option selection
+  const handleSortSelect = (option: SortOption) => {
+    setSortOption(option);
+    setShowSortMenu(false);
+  };
+  
   return (
     <main className="min-h-screen bg-gray-50 text-zinc-900">
       <div className="container mx-auto px-4 py-8 max-w-4xl">
@@ -214,32 +253,70 @@ export default function Communities() {
         {/* Filter and sort options - Reddit-like */}
         <div className="bg-white rounded-md shadow-sm mb-4 p-3 flex items-center justify-between">
           <div className="flex space-x-4">
-            <button className="flex items-center text-sm font-medium text-zinc-600 hover:bg-gray-100 rounded-full px-3 py-1.5">
+            <button 
+              className={`flex items-center text-sm font-medium ${sortOption === 'popular' ? 'text-[#008CFF] bg-blue-50' : 'text-zinc-600 hover:bg-gray-100'} rounded-full px-3 py-1.5`}
+              onClick={() => handleSortSelect('popular')}
+            >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
               </svg>
               Popular
             </button>
-            <button className="flex items-center text-sm font-medium text-zinc-600 hover:bg-gray-100 rounded-full px-3 py-1.5">
+            <button 
+              className={`flex items-center text-sm font-medium ${sortOption === 'trending' ? 'text-[#008CFF] bg-blue-50' : 'text-zinc-600 hover:bg-gray-100'} rounded-full px-3 py-1.5`}
+              onClick={() => handleSortSelect('trending')}
+            >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
               </svg>
               Trending
             </button>
-            <button className="flex items-center text-sm font-medium text-zinc-600 hover:bg-gray-100 rounded-full px-3 py-1.5">
+            <button 
+              className={`flex items-center text-sm font-medium ${sortOption === 'new' ? 'text-[#008CFF] bg-blue-50' : 'text-zinc-600 hover:bg-gray-100'} rounded-full px-3 py-1.5`}
+              onClick={() => handleSortSelect('new')}
+            >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               New
             </button>
           </div>
-          <div>
-            <button className="flex items-center text-sm font-medium text-zinc-600 hover:bg-gray-100 rounded-full px-3 py-1.5">
+          <div className="relative">
+            <button 
+              className="flex items-center text-sm font-medium text-zinc-600 hover:bg-gray-100 rounded-full px-3 py-1.5"
+              onClick={() => setShowSortMenu(!showSortMenu)}
+            >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4" />
               </svg>
-              Sort
+              More Options
             </button>
+            
+            {/* Sort dropdown menu */}
+            {showSortMenu && (
+              <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-50">
+                <div className="py-1 rounded-md bg-white shadow-xs">
+                  <button
+                    onClick={() => handleSortSelect('price-low')}
+                    className={`block px-4 py-2 text-sm text-gray-700 w-full text-left hover:bg-gray-100 ${sortOption === 'price-low' ? 'bg-blue-50 text-blue-600' : ''}`}
+                  >
+                    Price: Low to High
+                  </button>
+                  <button
+                    onClick={() => handleSortSelect('price-high')}
+                    className={`block px-4 py-2 text-sm text-gray-700 w-full text-left hover:bg-gray-100 ${sortOption === 'price-high' ? 'bg-blue-50 text-blue-600' : ''}`}
+                  >
+                    Price: High to Low
+                  </button>
+                  <button
+                    onClick={() => handleSortSelect('members')}
+                    className={`block px-4 py-2 text-sm text-gray-700 w-full text-left hover:bg-gray-100 ${sortOption === 'members' ? 'bg-blue-50 text-blue-600' : ''}`}
+                  >
+                    By Member Capacity
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
         
@@ -287,7 +364,7 @@ export default function Communities() {
           </div>
         ) : (
           <div className="space-y-3">
-            {communities.map(community => (
+            {sortedCommunities.map(community => (
               <div key={community.id} className="bg-white rounded-md shadow-sm hover:shadow transition">
                 <div className="flex p-4">
                   {/* Community icon */}
