@@ -1,10 +1,11 @@
 "use client";
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { doc, getDoc, collection, query, where, getDocs, addDoc, onSnapshot, orderBy, Timestamp, setDoc } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, getDocs, addDoc, onSnapshot, orderBy, Timestamp, setDoc, limit } from 'firebase/firestore';
 import { db } from '../../../lib/firebase';
 import { useActiveAccount } from "thirdweb/react";
 import Link from 'next/link';
+import Image from 'next/image';
 
 interface Community {
   id: string;
@@ -51,6 +52,7 @@ interface Message {
   replyTo?: string;
   replyToSender?: string;
   replyToText?: string;
+  cachedDisplayName?: string;
 }
 
 export default function ChatRoom() {
@@ -74,8 +76,21 @@ export default function ChatRoom() {
   const [profileChecked, setProfileChecked] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [redeemMsg, setRedeemMsg] = useState<{show: boolean, item: string} | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');
+  const [wasEverMember, setWasEverMember] = useState(false);
+  const [currentUserMember, setCurrentUserMember] = useState<Member | null>(null);
+  const [previousAccountAddress, setPreviousAccountAddress] = useState<string | null>(null);
+  const [isAccountFluctuating, setIsAccountFluctuating] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  const messageSubscriptionRef = useRef<{active: boolean; unsubscribe?: () => void}>({
+    active: false
+  });
+  
+  // Add refs to track effect states and prevent infinite loops
+  const initialProfileRefreshRef = useRef(false);
+  const refreshingMembersRef = useRef(false);
   
   // Add loading timeout to prevent infinite loading
   useEffect(() => {
@@ -109,11 +124,18 @@ export default function ChatRoom() {
     }
   }, []);
   
-  // Function to refresh members list - moved before any useEffect that references it
-  const refreshMembers = async () => {
+  // Function to refresh members list - with guard against infinite loops
+  const refreshMembers = useCallback(async () => {
     if (!communityId) return;
     
+    // Return immediately if we're already refreshing to prevent cascading refreshes
+    if (refreshingMembersRef.current) {
+      console.log("Skipping duplicate members refresh - already in progress");
+      return;
+    }
+    
     try {
+      refreshingMembersRef.current = true;
       console.log("Refreshing members list after profile update");
       // Create a Map to ensure unique members by wallet address
       const membersMap = new Map<string, Member>();
@@ -162,15 +184,27 @@ export default function ChatRoom() {
               member.displayName = profileData.displayName;
               console.log(`Updated display name for ${walletAddress}: ${profileData.displayName}`);
             }
+            // Use the correct property name 'avatar' from the profile data
             if (profileData.avatar) {
               member.avatarUrl = profileData.avatar;
               console.log(`Updated avatar for ${walletAddress}: ${profileData.avatar}`);
+              
+              // Pre-load the image to check if it's valid
+              const img = document.createElement('img');
+              img.width = 40;
+              img.height = 40;
+              img.src = profileData.avatar;
+              img.onload = () => console.log(`Successfully pre-loaded avatar for ${walletAddress}`);
+              img.onerror = () => {
+                console.error(`Failed to pre-load avatar for ${walletAddress}, will use fallback`);
+                // Don't update here, let the error handling in the component handle it
+              };
             }
           }
           
           // If this is the creator and they don't have a profile name, use "Creator" as fallback
           if (community?.creatorAddress?.toLowerCase() === walletAddress && !member.displayName) {
-            member.displayName = walletAddress;
+            member.displayName = "Creator";
             console.log(`Using fallback name "Creator" for community creator: ${walletAddress}`);
           }
           
@@ -198,8 +232,11 @@ export default function ChatRoom() {
       setMembers([...updatedMembersData]);
     } catch (err) {
       console.error("Error refreshing members:", err);
+    } finally {
+      // Always clear the refreshing flag when done
+      refreshingMembersRef.current = false;
     }
-  };
+  }, [communityId, community]);
   
   // Force refresh of avatars - useful when debugging avatar issues
   const forceRefreshAvatars = () => {
@@ -226,7 +263,43 @@ export default function ChatRoom() {
   
   // Check if user has completed a profile for this community
   useEffect(() => {
-    if (!activeAccount?.address || !communityId || userStatus !== 'member' || profileChecked) {
+    // Don't perform check if no active account or no community
+    if (!activeAccount?.address || !communityId) {
+      return;
+    }
+    
+    // Skip if we've already checked
+    if (profileChecked) {
+      return;
+    }
+    
+    // If we're not sure yet if user is a member (loading state), 
+    // do a direct check to avoid waiting
+    if (userStatus === 'loading' || userStatus === 'nonmember') {
+      // First check if they're actually a member in the database
+      const checkDirectMembership = async () => {
+        try {
+          console.log("Doing direct membership check for profile verification");
+          const directMemberQuery = query(
+            collection(db, "members"), 
+            where("communityId", "==", communityId),
+            where("walletAddress", "==", activeAccount.address.toLowerCase())
+          );
+          const directMemberSnapshot = await getDocs(directMemberQuery);
+          
+          if (directMemberSnapshot.empty) {
+            console.log("User is definitely not a member, skipping profile check");
+            return;
+          }
+          
+          // If we get here, the user is a member, so check their profile
+          checkProfile();
+        } catch (err) {
+          console.error("Error in direct membership check:", err);
+        }
+      };
+      
+      checkDirectMembership();
       return;
     }
     
@@ -246,8 +319,8 @@ export default function ChatRoom() {
           if (profileData.isProfileComplete === true) {
             console.log("Profile is complete, user can access chat");
             setProfileChecked(true);
-            // Refresh members list to include updated profile
-            refreshMembers();
+            // Don't call refreshMembers directly here to avoid loops
+            // The profile check completion will trigger the profile refresh effect
             return; // Exit early if profile is complete
           } else {
             console.log("Profile exists but is not complete:", profileData.isProfileComplete);
@@ -268,13 +341,12 @@ export default function ChatRoom() {
       }
     }
     
-    // Add a small delay to ensure database operations have completed
-    const timerId = setTimeout(() => {
+    // If user is a member, check their profile
+    if (userStatus === 'member') {
       checkProfile();
-    }, 500);
+    }
     
-    return () => clearTimeout(timerId);
-  }, [activeAccount?.address, communityId, userStatus, profileChecked, router, refreshMembers]);
+  }, [activeAccount?.address, communityId, userStatus, profileChecked]);
   
   // New effect to check if we're returning from profile setup
   useEffect(() => {
@@ -349,6 +421,38 @@ export default function ChatRoom() {
     fetchCommunity();
   }, [communityId]);
   
+  // Handle account connection fluctuations
+  useEffect(() => {
+    // If we had an account but it's gone now, it might be a temporary fluctuation
+    if (previousAccountAddress && !activeAccount?.address) {
+      console.log("Account connection fluctuation detected - previous:", previousAccountAddress);
+      
+      // Mark that we're in a fluctuation state
+      setIsAccountFluctuating(true);
+      
+      // Set a timeout to wait for connection to return before changing user status
+      const fluctuationTimeout = setTimeout(() => {
+        if (!activeAccount?.address) {
+          console.log("Account connection not restored after timeout");
+          setIsAccountFluctuating(false);
+        }
+      }, 5000); // 5 second grace period for connection to return
+      
+      return () => clearTimeout(fluctuationTimeout);
+    }
+    
+    // If account is back after fluctuation, clear the fluctuation state
+    if (isAccountFluctuating && activeAccount?.address) {
+      console.log("Account connection restored:", activeAccount.address);
+      setIsAccountFluctuating(false);
+    }
+    
+    // Store the current account for future reference
+    if (activeAccount?.address) {
+      setPreviousAccountAddress(activeAccount.address);
+    }
+  }, [activeAccount?.address, previousAccountAddress, isAccountFluctuating]);
+  
   // Fetch members and set user status
   useEffect(() => {
     async function fetchMembers() {
@@ -389,8 +493,9 @@ export default function ChatRoom() {
         }
         
         // 3. Enrich with profile data
-        for (const [walletAddress, member] of membersMap.entries()) {
+        const profilePromises = Array.from(membersMap.entries()).map(async ([walletAddress, member]) => {
           try {
+            // Always get fresh profile data from Firestore for better consistency
             const profileRef = doc(db, "communities", communityId, "profiles", walletAddress);
             const profileSnapshot = await getDoc(profileRef);
             
@@ -398,6 +503,7 @@ export default function ChatRoom() {
               const profileData = profileSnapshot.data();
               if (profileData.displayName) {
                 member.displayName = profileData.displayName;
+                console.log(`Set display name for ${walletAddress}: ${profileData.displayName}`);
               }
               if (profileData.avatar) {
                 member.avatarUrl = profileData.avatar;
@@ -409,6 +515,7 @@ export default function ChatRoom() {
             if (community?.creatorAddress?.toLowerCase() === walletAddress && !member.displayName) {
               member.displayName = "Creator";
             }
+            return member;
           } catch (err) {
             console.error(`Error fetching profile for member ${walletAddress}:`, err);
             // Continue with existing member data
@@ -417,38 +524,93 @@ export default function ChatRoom() {
             if (community?.creatorAddress?.toLowerCase() === walletAddress && !member.displayName) {
               member.displayName = "Creator";
             }
+            return member;
           }
-        }
+        });
+        
+        await Promise.all(profilePromises);
         
         // Convert Map to array
         const updatedMembersData = Array.from(membersMap.values());
         console.log(`Final member count: ${updatedMembersData.length}`);
         setMembers(updatedMembersData);
         
-        // 4. Check if current user is a member
+        // 4. Check if current user is a member - with fluctuation handling
         if (activeAccount?.address) {
           console.log("Current user wallet:", activeAccount.address);
           const normalizedUserAddress = activeAccount.address.toLowerCase();
           
-          const isMember = membersMap.has(normalizedUserAddress);
+          // First check in the members map we've already loaded
+          let isMember = membersMap.has(normalizedUserAddress);
           const isCreator = community?.creatorAddress?.toLowerCase() === normalizedUserAddress;
+          
+          // If not found in the map, do a direct database check
+          // This handles the case of a user who just joined but the local members list hasn't updated yet
+          if (!isMember && !isCreator) {
+            try {
+              console.log("Checking database directly for membership");
+              const directMemberQuery = query(
+                collection(db, "members"), 
+                where("communityId", "==", communityId),
+                where("walletAddress", "==", normalizedUserAddress)
+              );
+              const directMemberSnapshot = await getDocs(directMemberQuery);
+              
+              if (!directMemberSnapshot.empty) {
+                console.log("User found as member in direct database check");
+                isMember = true;
+                
+                // Add member to our local map for future use
+                const memberDoc = directMemberSnapshot.docs[0];
+                const memberData = memberDoc.data();
+                
+                const newMember = {
+                  id: memberDoc.id,
+                  walletAddress: normalizedUserAddress,
+                  displayName: memberData.displayName,
+                  avatarUrl: memberData.avatarUrl,
+                  joinedAt: memberData.joinedAt
+                };
+                
+                // Update the members state to include this member
+                setMembers(prev => [...prev, newMember]);
+              }
+            } catch (err) {
+              console.error("Error checking direct membership:", err);
+            }
+          }
           
           console.log("Membership check - Is member:", isMember, "Is creator:", isCreator);
           
           if (isMember || isCreator) {
             console.log("Setting user status to 'member'");
             setUserStatus('member');
+            setWasEverMember(true);
+            sessionStorage.setItem('wasEverMember_' + communityId, 'true');
+            
+            // Store the current account address in local storage for reconnection handling
+            localStorage.setItem('lastMemberAccount_' + communityId, normalizedUserAddress);
           } else {
             console.log("Setting user status to 'nonmember'");
             setUserStatus('nonmember');
           }
+        } else if (isAccountFluctuating) {
+          // If we're in a fluctuation state, don't change the user status yet
+          console.log("Account fluctuating, maintaining current user status:", userStatus);
         } else {
           console.log("No active account, can't determine membership");
+          
+          // Try to check if we have a stored member account address that matches this community
+          const lastMemberAccount = localStorage.getItem('lastMemberAccount_' + communityId);
+          const storedMemberStatus = sessionStorage.getItem('wasEverMember_' + communityId);
+          
+          if (lastMemberAccount && storedMemberStatus === 'true') {
+            console.log("Detected previously verified member account:", lastMemberAccount);
+            setWasEverMember(true);
+          }
+          
           setUserStatus('nonmember');
         }
-        
-        // Schedule a refresh to ensure we have the latest profile data
-        setTimeout(() => refreshMembers(), 1000);
       } catch (err) {
         console.error("Error fetching members:", err);
         setUserStatus('nonmember');
@@ -499,11 +661,18 @@ export default function ChatRoom() {
     fetchMerchandise();
   }, [communityId]);
   
-  // Subscribe to messages
+  // Subscribe to messages - with improved stability
   useEffect(() => {
     // Don't wait for member status to be confirmed, just check if we're definitely not a member
-    if (userStatus === 'nonmember') {
+    // Also skip subscription if we're in a fluctuation state to avoid unnecessary resubscribes
+    if (userStatus === 'nonmember' && !wasEverMember) {
       console.log('Not subscribing to messages - user is definitely not a member');
+      return;
+    }
+    
+    // If we already have an active subscription, don't create another one
+    if (messageSubscriptionRef.current.active) {
+      console.log('Message subscription already active, skipping new subscription');
       return;
     }
     
@@ -512,26 +681,81 @@ export default function ChatRoom() {
     let hasUnsubscribed = false;
     
     try {
-      // First, create a basic query without the orderBy clause
+      // First, create a simpler query that doesn't require a composite index
+      // This avoids the "requires an index" error
       const q = query(
         collection(db, "messages"),
         where("communityId", "==", communityId)
+        // No orderBy or limit to avoid requiring composite index
       );
       
-      // Add a timeout to abort if the subscription takes too long to initialize
+      // Increase timeout to be more forgiving of slow connections
       const subscriptionTimeout = setTimeout(() => {
-        console.log("Message subscription timeout reached");
+        console.log("Message subscription timeout reached - connection might be slow");
         if (!hasUnsubscribed && unsubscribe) {
+          console.log("Canceling subscription attempt due to timeout");
           unsubscribe();
           hasUnsubscribed = true;
+          
+          // Set an error state but don't block the UI
+          setError("Chat connection timed out. Messages may not update in real-time. Try refreshing the page.");
+          setLoading(false);
         }
-      }, 5000); // 5 second timeout
+      }, 15000); // Increased from 5s to 15s for slower connections
       
+      console.log("Initiating Firestore real-time listener for messages...");
+      
+      // Start with a one-time query to get messages faster
+      getDocs(q).then((initialSnapshot) => {
+        try {
+          console.log(`Loaded ${initialSnapshot.docs.length} initial messages from Firestore`);
+          
+          // Process and display initial messages
+          const initialMessages = initialSnapshot.docs.map(doc => {
+            try {
+              const data = doc.data();
+              return {
+                id: doc.id,
+                ...data
+              } as Message;
+            } catch (err) {
+              console.error("Error processing message doc:", doc.id, err);
+              return null;
+            }
+          }).filter(Boolean) as Message[];
+          
+          // Sort by timestamp (newest last for display) - do client-side sorting
+          const sortedInitialMessages = initialMessages.sort((a, b) => {
+            const timeA = a.timestamp?.toMillis() || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+            const timeB = b.timestamp?.toMillis() || (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+            return timeA - timeB;
+          });
+          
+          // Limit to most recent 50 messages client-side
+          const limitedMessages = sortedInitialMessages.slice(-50);
+          
+          // Update state with initial messages
+          setMessages(limitedMessages);
+          setTimeout(() => scrollToBottom(), 100);
+          setLoading(false);
+          
+          // Clear initial timeout since we have messages
+          clearTimeout(subscriptionTimeout);
+        } catch (err) {
+          console.error("Error processing initial messages:", err);
+        }
+      }).catch(err => {
+        console.error("Failed to load initial messages:", err);
+      });
+      
+      // Then set up real-time listener for updates
       unsubscribe = onSnapshot(q, (querySnapshot) => {
         clearTimeout(subscriptionTimeout);
+        setConnectionStatus('connected'); // Update connection status on successful connection
+        messageSubscriptionRef.current.active = true;
         
         try {
-          console.log(`Received ${querySnapshot.docs.length} messages from Firestore`);
+          console.log(`Received ${querySnapshot.docs.length} messages from Firestore real-time update`);
           
           if (querySnapshot.metadata.fromCache) {
             console.log("Warning: Message data came from cache");
@@ -551,35 +775,56 @@ export default function ChatRoom() {
             }
           }).filter(Boolean) as Message[];
           
-          // Sort by timestamp
+          // Sort by timestamp (newest last for chat display)
           const sortedMessages = messagesData.sort((a, b) => {
             const timeA = a.timestamp?.toMillis() || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
             const timeB = b.timestamp?.toMillis() || (b.createdAt ? new Date(b.createdAt).getTime() : 0);
             return timeA - timeB;
           });
           
-          setMessages(sortedMessages);
-          setTimeout(() => scrollToBottom(), 100);
+          // Limit to most recent 50 messages client-side
+          const limitedMessages = sortedMessages.slice(-50);
           
-          // Messages loaded successfully - we can complete the loading state
+          setMessages(limitedMessages);
+          
+          // Only scroll for new messages if we're already at the bottom
+          const scrollContainer = document.querySelector('.overflow-y-auto');
+          const isAtBottom = scrollContainer ? 
+            (scrollContainer.scrollHeight - scrollContainer.scrollTop <= scrollContainer.clientHeight + 100) : 
+            true;
+            
+          if (isAtBottom) {
+            setTimeout(() => scrollToBottom(), 100);
+          }
+          
+          // Messages loaded successfully
           setLoading(false);
         } catch (err) {
           console.error("Error processing messages:", err);
           setError("Error loading messages. Please refresh the page.");
+          setConnectionStatus('error'); // Update connection status on error
           setLoading(false);
+          messageSubscriptionRef.current.active = false;
         }
       }, (error) => {
         clearTimeout(subscriptionTimeout);
         console.error("Error fetching messages:", error);
         setError(`Failed to load messages: ${error.message}`);
+        setConnectionStatus('error'); // Update connection status on error
         setLoading(false);
+        messageSubscriptionRef.current.active = false;
       });
       
+      // Store the unsubscribe function in our ref
+      messageSubscriptionRef.current.unsubscribe = unsubscribe;
+      messageSubscriptionRef.current.active = true;
       hasUnsubscribed = false;
     } catch (err) {
       console.error("Error setting up message listener:", err);
       setError("Could not connect to chat. Please refresh the page.");
+      setConnectionStatus('error'); // Update connection status on error
       setLoading(false);
+      messageSubscriptionRef.current.active = false;
     }
     
     return () => {
@@ -587,9 +832,10 @@ export default function ChatRoom() {
       if (unsubscribe && !hasUnsubscribed) {
         unsubscribe();
         hasUnsubscribed = true;
+        messageSubscriptionRef.current.active = false;
       }
     };
-  }, [communityId, userStatus]);
+  }, [communityId, userStatus, wasEverMember]); // Remove members dependency to avoid resubscribing
   
   // Scroll to bottom when new messages are added
   const scrollToBottom = () => {
@@ -611,22 +857,54 @@ export default function ChatRoom() {
     setReplyingTo(null);
   };
   
+  // Handle sending message with updated profile information
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Check if current user is the creator
-    const isCreator = community?.creatorAddress?.toLowerCase() === activeAccount?.address?.toLowerCase();
+    if (!newMessage.trim() || !activeAccount?.address) return;
     
-    // Check if profile has been checked yet, and force a profile check if not
-    if (!profileChecked && activeAccount?.address && userStatus === 'member') {
-      // If profile hasn't been checked yet, force a check before sending
-      const profileRef = doc(db, "communities", communityId, "profiles", activeAccount?.address || "");
+    // First, ensure the user is really a member even if the UI hasn't caught up
+    if (userStatus !== 'member') {
       try {
+        // Do a direct membership check
+        const directMemberQuery = query(
+          collection(db, "members"),
+          where("communityId", "==", communityId),
+          where("walletAddress", "==", activeAccount.address.toLowerCase())
+        );
+        const directMemberSnapshot = await getDocs(directMemberQuery);
+        
+        if (directMemberSnapshot.empty) {
+          console.log("User tried to send message but is not a member");
+          setMessageError("You must be a member of this community to send messages.");
+          return;
+        } else {
+          // User is a member but state hasn't updated yet
+          console.log("User is a member but state hasn't updated - continuing with message");
+          // Update the state so future checks are faster
+          setUserStatus('member');
+        }
+      } catch (err) {
+        console.error("Error checking membership before sending:", err);
+        setMessageError("Could not verify your membership. Please try again.");
+        return;
+      }
+    }
+    
+    // Check if profile has been checked yet, and force a profile check
+    if (!profileChecked) {
+      try {
+        // Always check profile before sending
+        const profileRef = doc(db, "communities", communityId, "profiles", activeAccount.address);
         const profileSnapshot = await getDoc(profileRef);
+        
         if (!profileSnapshot.exists() || !profileSnapshot.data().isProfileComplete) {
+          console.log("User needs to complete profile before sending messages");
           setShowProfileModal(true);
           return;
         }
+        
+        // If we get here, the profile is complete
         setProfileChecked(true);
       } catch (err) {
         console.error("Error checking profile before sending message:", err);
@@ -634,20 +912,21 @@ export default function ChatRoom() {
       }
     }
     
-    if (!newMessage.trim() || !activeAccount?.address || userStatus !== 'member') return;
-    
     setMessageError(null);
     setSendingMessage(true);
     const messageText = newMessage; // Store message for retry
     
+    // Check if current user is the creator
+    const isCreator = community?.creatorAddress?.toLowerCase() === activeAccount?.address?.toLowerCase();
+    
     try {
+      // First refresh member list to ensure latest profile data
+      await refreshMembers();
+      
       // Find member info for the sender
       const senderMember = members.find(
         member => member.walletAddress.toLowerCase() === activeAccount.address.toLowerCase()
       );
-      
-      // Check if sender is the creator
-      const isCreator = community?.creatorAddress?.toLowerCase() === activeAccount.address.toLowerCase();
       
       // Get profile information if available
       let senderName = senderMember?.displayName || (isCreator ? 'Creator' : activeAccount.address.substring(0, 6) + '...');
@@ -772,13 +1051,238 @@ export default function ChatRoom() {
     console.log(`Attempted to redeem ${item.name} for ${item.pointsCost} points`);
   };
   
-  // Additional effect to refresh members list when profile status changes
+  // Additional effect to refresh members list when profile status changes - with guards
   useEffect(() => {
-    if (profileChecked && userStatus === 'member' && activeAccount?.address) {
+    if (profileChecked && userStatus === 'member' && activeAccount?.address && !refreshingMembersRef.current) {
       console.log("Profile check completed, refreshing members list to update names");
       refreshMembers();
     }
-  }, [profileChecked, userStatus, activeAccount?.address, communityId]);
+  }, [profileChecked, userStatus, activeAccount?.address, refreshMembers]);
+
+  // New effect to ensure profile data is refreshed on page load - with ref guard
+  useEffect(() => {
+    if (community && activeAccount?.address && userStatus === 'member' && !initialProfileRefreshRef.current && !refreshingMembersRef.current) {
+      console.log("Initial profile refresh on page load");
+      initialProfileRefreshRef.current = true;
+      refreshMembers();
+    }
+  }, [community, activeAccount?.address, userStatus, refreshMembers]);
+  
+  // Update current user member data whenever members change - with optimization
+  useEffect(() => {
+    if (members.length > 0 && activeAccount?.address) {
+      const foundMember = members.find(m => 
+        m.walletAddress.toLowerCase() === activeAccount.address.toLowerCase()
+      );
+      
+      if (foundMember && (
+        // Only update if the data has actually changed to prevent loops
+        !currentUserMember || 
+        foundMember.displayName !== currentUserMember.displayName ||
+        foundMember.avatarUrl !== currentUserMember.avatarUrl
+      )) {
+        console.log("Updated current user member data:", foundMember);
+        setCurrentUserMember(foundMember);
+      }
+    }
+  }, [members, activeAccount?.address, currentUserMember]);
+
+  // Persist member status for UI stability
+  useEffect(() => {
+    if (userStatus === 'member') {
+      console.log("User confirmed as member, setting wasEverMember flag");
+      setWasEverMember(true);
+      
+      // Store in sessionStorage as backup
+      sessionStorage.setItem('wasEverMember_' + communityId, 'true');
+    }
+  }, [userStatus, communityId]);
+
+  // Restore member status from session storage on initial load
+  useEffect(() => {
+    const storedMemberStatus = sessionStorage.getItem('wasEverMember_' + communityId);
+    if (storedMemberStatus === 'true' && !wasEverMember) {
+      console.log("Restoring member status from session storage");
+      setWasEverMember(true);
+    }
+  }, [communityId, wasEverMember]);
+  
+  // Add a function to retry connection
+  const retryConnection = () => {
+    console.log("Manually retrying connection...");
+    setConnectionStatus('connecting');
+    setError(null);
+    
+    // Force reload messages subscription by changing a dependency
+    // This will trigger the useEffect for message subscription
+    setUserStatus('loading');
+    setTimeout(() => {
+      // Set back to member after a small delay
+      if (activeAccount?.address) {
+        const isCreator = community?.creatorAddress?.toLowerCase() === activeAccount.address.toLowerCase();
+        const isMember = members.some(m => m.walletAddress.toLowerCase() === activeAccount.address.toLowerCase());
+        
+        if (isCreator || isMember) {
+          setUserStatus('member');
+        } else {
+          setUserStatus('nonmember');
+        }
+      } else {
+        setUserStatus('nonmember');
+      }
+    }, 100);
+  };
+  
+  // Create a helper function to get the most current display name for a wallet address
+  const getCurrentDisplayName = (walletAddress: string): string => {
+    if (!walletAddress) return 'Unknown';
+    
+    // Normalize the wallet address
+    const normalizedAddress = walletAddress.toLowerCase();
+    
+    // First check in the latest members list
+    const member = members.find(m => m.walletAddress.toLowerCase() === normalizedAddress);
+    if (member?.displayName) {
+      return member.displayName;
+    }
+    
+    // Check if this is the creator
+    if (community?.creatorAddress?.toLowerCase() === normalizedAddress) {
+      return 'Creator';
+    }
+    
+    // Fall back to shortened wallet address
+    return normalizedAddress.substring(0, 6) + '...';
+  };
+
+  // Separate effect to update messages with latest member data without resubscribing
+  useEffect(() => {
+    if (members.length === 0 || messages.length === 0) return;
+    
+    // Don't log on every render to avoid console spam
+    if (process.env.NODE_ENV === 'development') {
+      console.log("Members list updated, updating message display names");
+    }
+    
+    // Force message component re-render by recreating the messages array
+    // Use a ref to prevent this from running on every render
+    const needsUpdate = messages.some(message => {
+      const displayName = getCurrentDisplayName(message.senderAddress);
+      return displayName !== message.cachedDisplayName;
+    });
+    
+    if (needsUpdate) {
+      setMessages(prevMessages => 
+        prevMessages.map(message => ({
+          ...message,
+          cachedDisplayName: getCurrentDisplayName(message.senderAddress)
+        }))
+      );
+    }
+  }, [members, getCurrentDisplayName, messages]);
+  
+  // Handle user typing in the message input field
+  const handleInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = e.target.value;
+    setNewMessage(newValue);
+    
+    // Only do checks when they start typing (empty → non-empty)
+    if (newValue.trim() !== '' && newMessage.trim() === '' && activeAccount?.address) {
+      console.log("User started typing, checking membership and profile status");
+      
+      // If status is not member, check directly in the database
+      if (userStatus !== 'member') {
+        try {
+          const directMemberQuery = query(
+            collection(db, "members"),
+            where("communityId", "==", communityId),
+            where("walletAddress", "==", activeAccount.address.toLowerCase())
+          );
+          const directMemberSnapshot = await getDocs(directMemberQuery);
+          
+          if (!directMemberSnapshot.empty) {
+            console.log("User is a member but state hasn't updated yet");
+            setUserStatus('member');
+            
+            // Now check profile
+            const profileRef = doc(db, "communities", communityId, "profiles", activeAccount.address);
+            const profileSnapshot = await getDoc(profileRef);
+            
+            if (!profileSnapshot.exists() || !profileSnapshot.data().isProfileComplete) {
+              console.log("New member needs to complete profile");
+              setShowProfileModal(true);
+            } else {
+              setProfileChecked(true);
+            }
+          }
+        } catch (err) {
+          console.error("Error checking membership when typing:", err);
+        }
+      }
+      // If we're already a member but profile hasn't been checked
+      else if (!profileChecked) {
+        try {
+          const profileRef = doc(db, "communities", communityId, "profiles", activeAccount.address);
+          const profileSnapshot = await getDoc(profileRef);
+          
+          if (!profileSnapshot.exists() || !profileSnapshot.data().isProfileComplete) {
+            console.log("Member needs to complete profile before sending messages");
+            setShowProfileModal(true);
+          } else {
+            setProfileChecked(true);
+          }
+        } catch (err) {
+          console.error("Error checking profile when typing:", err);
+        }
+      }
+    }
+  };
+  
+  // Check for new members that need profile setup immediately on page load
+  useEffect(() => {
+    if (!activeAccount?.address || !communityId || userStatus === 'member' || profileChecked) {
+      return;
+    }
+
+    const checkNewMember = async () => {
+      console.log("Checking if user is a new member that needs profile setup");
+      try {
+        // Check if the user is a member in the database directly
+        const directMemberQuery = query(
+          collection(db, "members"),
+          where("communityId", "==", communityId),
+          where("walletAddress", "==", activeAccount.address.toLowerCase())
+        );
+        const directMemberSnapshot = await getDocs(directMemberQuery);
+        
+        if (directMemberSnapshot.empty) {
+          console.log("User is not a member according to direct database check");
+          return;
+        }
+        
+        console.log("User is a new member, updating status");
+        setUserStatus('member');
+        
+        // Check if they have a completed profile
+        const profileRef = doc(db, "communities", communityId, "profiles", activeAccount.address);
+        const profileSnapshot = await getDoc(profileRef);
+        
+        if (!profileSnapshot.exists() || !profileSnapshot.data().isProfileComplete) {
+          console.log("New member needs to complete profile, showing modal");
+          setTimeout(() => setShowProfileModal(true), 1000); // Delay to let UI stabilize
+        } else {
+          console.log("New member already has a complete profile");
+          setProfileChecked(true);
+        }
+      } catch (err) {
+        console.error("Error checking new member status:", err);
+      }
+    };
+    
+    // Run with a slight delay to allow other initializations to complete
+    const timerId = setTimeout(checkNewMember, 1500);
+    return () => clearTimeout(timerId);
+  }, [activeAccount?.address, communityId, userStatus, profileChecked]);
   
   if (error) {
     return (
@@ -925,9 +1429,11 @@ export default function ChatRoom() {
               merchandise.map((item) => (
                 <div key={item.id} className="bg-white border border-gray-200 rounded-md p-3">
                   <div className="h-20 bg-gray-100 rounded-md mb-2 overflow-hidden">
-                    <img 
+                    <Image 
                       src={item.imageUrl} 
                       alt={item.name} 
+                      width={80}
+                      height={80}
                       className="w-full h-full object-cover"
                     />
                   </div>
@@ -974,6 +1480,38 @@ export default function ChatRoom() {
               {members.length} member{members.length !== 1 ? 's' : ''}
             </div>
           </div>
+          <div className="flex items-center">
+            {/* Add wallet connection status indicator */}
+            <div className={`h-2.5 w-2.5 rounded-full mr-1.5 ${
+              activeAccount?.address ? 'bg-green-500' : 
+              isAccountFluctuating ? 'bg-yellow-500 animate-pulse' : 
+              'bg-gray-500'
+            }`}></div>
+            <span className="text-xs text-zinc-500 mr-4">
+              {activeAccount?.address ? 'Wallet Connected' : 
+               isAccountFluctuating ? 'Reconnecting...' : 
+               'Wallet Disconnected'}
+            </span>
+            
+            <div className={`h-2.5 w-2.5 rounded-full mr-1.5 ${
+              connectionStatus === 'connected' ? 'bg-green-500' : 
+              connectionStatus === 'connecting' ? 'bg-yellow-500 animate-pulse' : 
+              'bg-red-500'
+            }`}></div>
+            <span className="text-xs text-zinc-500">
+              {connectionStatus === 'connected' ? 'Connected' : 
+               connectionStatus === 'connecting' ? 'Connecting...' : 
+               'Connection Error'}
+            </span>
+            {connectionStatus === 'error' && (
+              <button 
+                onClick={retryConnection}
+                className="ml-2 text-xs text-blue-500 hover:text-blue-700 underline"
+              >
+                Retry
+              </button>
+            )}
+          </div>
         </div>
         
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -985,43 +1523,66 @@ export default function ChatRoom() {
             messages.map((message) => (
               <div key={message.id} className="flex items-start group">
                 <div className="w-10 h-10 rounded-full bg-gray-100 flex-shrink-0 overflow-hidden mr-3">
-                  {message.senderAvatar ? (
-                    <img 
-                      src={message.senderAvatar} 
-                      alt="Avatar" 
-                      className="w-full h-full object-cover" 
-                      onLoad={() => console.log("Avatar loaded successfully:", message.senderAvatar)}
-                      onError={(e) => {
-                        console.error("Failed to load avatar image:", message.senderAvatar);
-                        // Fall back to default avatar
-                        const target = e.target as HTMLImageElement;
-                        target.onerror = null; // Prevent infinite error loop
-                        target.src = `https://api.dicebear.com/7.x/identicon/svg?seed=${message.senderAddress}`;
-                      }}
-                    />
-                  ) : (
-                    <div className={`w-full h-full flex items-center justify-center ${message.isCreator ? 'bg-[#008CFF]' : 'bg-gray-200'} ${message.isCreator ? 'text-white' : 'text-zinc-600'}`}>
-                      <img 
-                        src={`https://api.dicebear.com/7.x/identicon/svg?seed=${message.senderAddress}`}
-                        alt="Default Avatar" 
-                        className="w-full h-full object-cover"
+                  {(() => {
+                    // Find the member in the members list to get their current avatar
+                    const messageSender = members.find(m => 
+                      m.walletAddress.toLowerCase() === message.senderAddress.toLowerCase()
+                    );
+                    
+                    // Use the member's current avatar if available, otherwise fall back to the message avatar
+                    const currentAvatar = messageSender?.avatarUrl || message.senderAvatar;
+                    
+                    return currentAvatar ? (
+                      <Image 
+                        src={currentAvatar} 
+                        alt="Avatar" 
+                        width={40}
+                        height={40}
+                        className="w-full h-full object-cover" 
+                        onLoadingComplete={() => console.log(`Message avatar loaded successfully for ${message.senderAddress}`)}
                         onError={(e) => {
-                          // Fallback to initials if the default avatar fails to load
-                          const target = e.target as HTMLImageElement;
-                          target.style.display = 'none';
-                          const parent = target.parentElement;
-                          if (parent) {
-                            parent.textContent = message.senderName?.[0] || '?';
-                          }
+                          console.error(`Failed to load message avatar for ${message.senderAddress}:`, currentAvatar);
+                          // Fall back to default avatar URL
+                          const fallbackUrl = `https://api.dicebear.com/7.x/identicon/svg?seed=${message.senderAddress}`;
+                          setMessages(prev => prev.map(msg => 
+                            msg.id === message.id 
+                              ? {...msg, senderAvatar: fallbackUrl} 
+                              : msg
+                          ));
                         }}
                       />
-                    </div>
-                  )}
+                    ) : (
+                      <div className={`w-full h-full flex items-center justify-center ${message.isCreator ? 'bg-[#008CFF]' : 'bg-gray-200'} ${message.isCreator ? 'text-white' : 'text-zinc-600'}`}>
+                        <Image 
+                          src={`https://api.dicebear.com/7.x/identicon/svg?seed=${message.senderAddress}`}
+                          alt="Default Avatar" 
+                          width={40}
+                          height={40}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            // If even the default fails, we'll just show fallback text
+                            const firstChar = message.senderName?.[0] || message.senderAddress[0] || '?';
+                            const div = document.createElement('div');
+                            div.textContent = firstChar;
+                            div.className = 'flex items-center justify-center w-full h-full';
+                            
+                            // Find the parent container and replace the image with the text div
+                            const parent = e.currentTarget.parentElement;
+                            if (parent) {
+                              parent.innerHTML = '';
+                              parent.appendChild(div);
+                            }
+                          }}
+                        />
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div className="flex-1">
                   <div className="flex items-baseline">
                     <span className={`font-medium ${message.isCreator ? 'text-[#008CFF]' : 'text-zinc-900'}`}>
-                      {message.senderName || message.senderAddress.substring(0, 6) + '...'}
+                      {/* Always get the current display name using our helper function */}
+                      {getCurrentDisplayName(message.senderAddress)}
                     </span>
                     <span className="ml-2 text-xs text-zinc-400">
                       {message.timestamp?.toDate ? 
@@ -1088,32 +1649,7 @@ export default function ChatRoom() {
             <input
               type="text"
               value={newMessage}
-              onChange={(e) => {
-                // Check if current user is the creator
-                const isCreator = community?.creatorAddress?.toLowerCase() === activeAccount?.address?.toLowerCase();
-                
-                // If this is the first time they're typing and profile hasn't been checked
-                // Remove isCreator check to require profile for all users
-                if (!profileChecked && activeAccount?.address && userStatus === 'member' && !showProfileModal) {
-                  // Show the profile completion modal
-                  const checkProfileCompletion = async () => {
-                    const profileRef = doc(db, "communities", communityId, "profiles", activeAccount?.address || "");
-                    try {
-                      const profileSnapshot = await getDoc(profileRef);
-                      if (!profileSnapshot.exists() || !profileSnapshot.data().isProfileComplete) {
-                        setShowProfileModal(true);
-                        return;
-                      }
-                      setProfileChecked(true);
-                    } catch (err) {
-                      console.error("Error checking profile when typing:", err);
-                    }
-                  };
-                  checkProfileCompletion();
-                }
-                
-                setNewMessage(e.target.value);
-              }}
+              onChange={handleInputChange}
               placeholder={replyingTo ? "Type your reply..." : "Type a message..."}
               className="flex-1 px-4 py-2 bg-white text-zinc-900 focus:outline-none"
               disabled={sendingMessage}
@@ -1160,42 +1696,67 @@ export default function ChatRoom() {
         </div>
 
         {/* Current user profile card */}
-        {activeAccount?.address && userStatus === 'member' && (
+        {(activeAccount?.address && (userStatus === 'member' || wasEverMember)) && (
           <div className="bg-white rounded-md p-3 mb-4 border border-gray-200">
             <div className="flex items-center">
               {/* Get current user info from members */}
               {(() => {
-                const currentMember = members.find(m => 
+                // Try to use currentUserMember state first if available
+                const currentMember = currentUserMember || members.find(m => 
                   m.walletAddress.toLowerCase() === activeAccount.address.toLowerCase()
                 );
                 const isCreator = community?.creatorAddress?.toLowerCase() === activeAccount.address.toLowerCase();
+                
+                // Add debug status indicators (only visible in development)
+                const debugStatus = process.env.NODE_ENV === 'development' ? (
+                  <div className="text-xs text-gray-400 mt-1">
+                    Status: {userStatus}, Ever Member: {wasEverMember ? 'Yes' : 'No'}
+                  </div>
+                ) : null;
                 
                 return (
                   <>
                     <div className="w-10 h-10 rounded-full bg-gray-100 flex-shrink-0 overflow-hidden mr-3">
                       {currentMember?.avatarUrl ? (
-                        <img 
+                        <Image 
                           src={currentMember.avatarUrl} 
                           alt="Your Avatar" 
+                          width={40}
+                          height={40}
                           className="w-full h-full object-cover"
+                          onLoadingComplete={() => console.log(`Avatar loaded successfully for ${currentMember.walletAddress}`)}
                           onError={(e) => {
-                            const target = e.target as HTMLImageElement;
-                            target.onerror = null;
-                            target.src = `https://api.dicebear.com/7.x/identicon/svg?seed=${activeAccount.address}`;
+                            console.error(`Failed to load avatar image for ${currentMember.walletAddress}:`, currentMember.avatarUrl);
+                            // Fall back to default avatar
+                            const fallbackUrl = `https://api.dicebear.com/7.x/identicon/svg?seed=${currentMember.walletAddress}`;
+                            if (currentUserMember) {
+                              setCurrentUserMember({
+                                ...currentUserMember,
+                                avatarUrl: fallbackUrl
+                              });
+                            }
                           }}
                         />
                       ) : (
                         <div className={`w-full h-full flex items-center justify-center ${isCreator ? 'bg-[#008CFF]' : 'bg-gray-200'} ${isCreator ? 'text-white' : 'text-zinc-600'}`}>
-                          <img 
-                            src={`https://api.dicebear.com/7.x/identicon/svg?seed=${activeAccount.address}`}
+                          <Image 
+                            src={`https://api.dicebear.com/7.x/identicon/svg?seed=${currentMember?.walletAddress || activeAccount.address}`}
                             alt="Default Avatar" 
+                            width={40}
+                            height={40}
                             className="w-full h-full object-cover"
                             onError={(e) => {
-                              const target = e.target as HTMLImageElement;
-                              target.style.display = 'none';
-                              const parent = target.parentElement;
+                              // Display initials as fallback
+                              const firstChar = currentMember?.displayName?.[0] || currentMember?.walletAddress[0] || '?';
+                              const div = document.createElement('div');
+                              div.textContent = firstChar;
+                              div.className = 'flex items-center justify-center w-full h-full';
+                              
+                              // Find the parent container and replace the image with the text div
+                              const parent = e.currentTarget.parentElement;
                               if (parent) {
-                                parent.textContent = currentMember?.displayName?.[0] || activeAccount.address[0] || '?';
+                                parent.innerHTML = '';
+                                parent.appendChild(div);
                               }
                             }}
                           />
@@ -1204,32 +1765,16 @@ export default function ChatRoom() {
                     </div>
                     <div className="flex-1">
                       <div className="font-medium">
-                        {currentMember?.displayName || activeAccount.address.substring(0, 6) + '...'}
+                        {currentMember?.displayName || currentMember?.walletAddress.substring(0, 6) + '...'}
                         {isCreator && (
                           <span className="ml-2 text-xs bg-blue-50 text-[#008CFF] px-1.5 py-0.5 rounded">Host</span>
                         )}
                       </div>
+                      {debugStatus}
                     </div>
                   </>
                 );
               })()}
-            </div>
-            
-            <div className="mt-3 text-center">
-              <button
-                onClick={() => {
-                  // Set flag to indicate edit mode and return to chat
-                  sessionStorage.setItem('profileEditMode', 'true');
-                  sessionStorage.setItem('returnedFromProfileSetup', communityId);
-                  router.push(`/communities/${communityId}/profile/setup`);
-                }}
-                className="w-full text-xs py-1.5 bg-gray-100 text-zinc-700 hover:bg-gray-200 rounded transition flex items-center justify-center"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                  <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
-                </svg>
-                Edit Profile
-              </button>
             </div>
           </div>
         )}
@@ -1249,32 +1794,44 @@ export default function ChatRoom() {
                 <div key={member.id} className="flex items-center bg-white hover:bg-gray-100 rounded-md p-2 transition-colors">
                   <div className="w-8 h-8 rounded-full bg-gray-100 flex-shrink-0 overflow-hidden mr-2">
                     {member.avatarUrl ? (
-                      <img 
+                      <Image 
                         src={member.avatarUrl} 
                         alt="Avatar" 
+                        width={32}
+                        height={32}
                         className="w-full h-full object-cover" 
-                        onLoad={() => console.log("Avatar loaded successfully:", member.avatarUrl)}
+                        onLoadingComplete={() => console.log(`Avatar loaded successfully for ${member.walletAddress}`)}
                         onError={(e) => {
-                          console.error("Failed to load avatar image:", member.avatarUrl);
-                          // Fall back to default avatar
-                          const target = e.target as HTMLImageElement;
-                          target.onerror = null; // Prevent infinite error loop
-                          target.src = `https://api.dicebear.com/7.x/identicon/svg?seed=${member.walletAddress}`;
+                          console.error(`Failed to load avatar image for ${member.walletAddress}:`, member.avatarUrl);
+                          // Update with fallback avatar URL
+                          const fallbackUrl = `https://api.dicebear.com/7.x/identicon/svg?seed=${member.walletAddress}`;
+                          setMembers(prev => prev.map(m => 
+                            m.id === member.id 
+                              ? {...m, avatarUrl: fallbackUrl} 
+                              : m
+                          ));
                         }}
                       />
                     ) : (
                       <div className={`w-full h-full flex items-center justify-center ${isCreator ? 'bg-[#008CFF]' : 'bg-gray-200'} ${isCreator ? 'text-white' : 'text-zinc-600'}`}>
-                        <img 
+                        <Image 
                           src={`https://api.dicebear.com/7.x/identicon/svg?seed=${member.walletAddress}`}
                           alt="Default Avatar" 
+                          width={32}
+                          height={32}
                           className="w-full h-full object-cover"
                           onError={(e) => {
-                            // Fallback to initials if the default avatar fails to load
-                            const target = e.target as HTMLImageElement;
-                            target.style.display = 'none';
-                            const parent = target.parentElement;
+                            // Display initials as fallback
+                            const firstChar = member.displayName?.[0] || member.walletAddress[0] || '?';
+                            const div = document.createElement('div');
+                            div.textContent = firstChar;
+                            div.className = 'flex items-center justify-center w-full h-full';
+                            
+                            // Find the parent container and replace the image with the text div
+                            const parent = e.currentTarget.parentElement;
                             if (parent) {
-                              parent.textContent = member.displayName?.[0] || member.walletAddress[0] || '?';
+                              parent.innerHTML = '';
+                              parent.appendChild(div);
                             }
                           }}
                         />
@@ -1338,6 +1895,10 @@ export default function ChatRoom() {
             
             <div className="bg-yellow-50 text-yellow-800 p-3 rounded-md mb-4 text-sm">
               <p><strong>Note:</strong> Profile completion is required to participate in this community.</p>
+            </div>
+            
+            <div className="bg-red-50 text-red-700 p-3 rounded-md mb-4 text-sm">
+              <p><strong>Important:</strong> Once your profile is created, it cannot be changed in the future. Please choose your display name and avatar carefully.</p>
             </div>
             
             <div className="mt-6 text-center">

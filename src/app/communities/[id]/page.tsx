@@ -82,6 +82,8 @@ export default function CommunityDetail() {
   const [priceUpdateSuccess, setPriceUpdateSuccess] = useState(false);
   const [sharedContractWarning, setSharedContractWarning] = useState<string | null>(null);
   const [memberCount, setMemberCount] = useState<number | null>(null);
+  const [membershipTokenId, setMembershipTokenId] = useState<string | null>(null);
+  const [isUserMember, setIsUserMember] = useState(false);
   
   // Function to check if multiple communities share the same contract address
   async function checkForSharedContracts(contractAddress: string, currentCommunityId: string) {
@@ -149,6 +151,40 @@ export default function CommunityDetail() {
               });
               
               setMemberCount(Number(totalMembers));
+              
+              // Check if the active account is a member
+              if (activeAccount) {
+                try {
+                  const isMember = await readContract({
+                    contract,
+                    method: "function isMember(address) view returns (bool)",
+                    params: [activeAccount.address]
+                  });
+                  setIsUserMember(Boolean(isMember));
+                  
+                  if (Boolean(isMember)) {
+                    // Get the tokenId of the user's membership NFT
+                    try {
+                      const ownerTokens = await readContract({
+                        contract,
+                        method: "function tokensOfOwner(address) view returns (uint256[])",
+                        params: [activeAccount.address]
+                      });
+                      
+                      if (ownerTokens && ownerTokens.length > 0) {
+                        // Get the most recent token
+                        const tokenId = ownerTokens[ownerTokens.length - 1].toString();
+                        setMembershipTokenId(tokenId);
+                      }
+                    } catch (tokenIdError) {
+                      console.error("Error retrieving NFT token ID:", tokenIdError);
+                    }
+                  }
+                } catch (membershipCheckError) {
+                  console.error("Error checking membership status:", membershipCheckError);
+                  setIsUserMember(false);
+                }
+              }
             } catch (error) {
               console.error("Error fetching member count:", error);
             }
@@ -528,6 +564,29 @@ export default function CommunityDetail() {
         // Success!
         setPurchaseError(null);
         setPurchaseStatus('success');
+        setIsUserMember(true);
+        
+        // Get the token ID of the NFT the user received
+        try {
+          // Get the tokenId of the user's membership NFT
+          const ownerTokens = await readContract({
+            contract,
+            method: "function tokensOfOwner(address) view returns (uint256[])",
+            params: [activeAccount.address]
+          });
+          
+          if (ownerTokens && ownerTokens.length > 0) {
+            // Get the most recent token (likely the one just minted)
+            const tokenId = ownerTokens[ownerTokens.length - 1].toString();
+            setMembershipTokenId(tokenId);
+            console.log("User received NFT with token ID:", tokenId);
+          } else {
+            console.log("Could not retrieve user's NFT token ID");
+          }
+        } catch (tokenIdError) {
+          console.error("Error retrieving NFT token ID:", tokenIdError);
+          // This is non-critical, so we continue even if it fails
+        }
         
         // Add member to Firestore database for chat functionality
         try {
@@ -944,25 +1003,58 @@ export default function CommunityDetail() {
                       As the creator of this community, you have full access to manage and participate.
                     </div>
                   </div>
+                ) : isUserMember ? (
+                  <div>
+                    <div className="mb-4 bg-green-50 text-green-600 p-4 rounded-lg text-sm">
+                      <p>You are already a member of this community!</p>
+                      
+                      {membershipTokenId && (
+                        <div className="mt-2 border-t border-green-100 pt-2">
+                          <div className="flex items-center gap-2 mt-1">
+                            {/* <span>Token ID: {membershipTokenId}</span>
+                            <a 
+                              href={`https://sepolia-explorer.base.org/token/${community.nftContractAddress}?a=${membershipTokenId}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:underline text-xs inline-flex items-center"
+                            >
+                              View on Explorer <span className="ml-1">↗</span>
+                            </a> */}
+                          </div>
+                        </div>
+                      )}
+                      
+                      <div className="mt-3">
+                        <Link href={`/communities/${communityId}/room`}>
+                          <button className="w-full py-2 rounded-lg text-white transition-colors bg-[#008CFF] hover:bg-[#0070CC]">
+                            Enter Community Room
+                          </button>
+                        </Link>
+                      </div>
+                    </div>
+                  </div>
                 ) : (
                   <div>
-                    <button
-                      onClick={handlePurchaseMembership}
-                      disabled={purchaseStatus === 'loading'}
-                      className={`w-full py-3 rounded-lg text-white transition-colors ${
-                        purchaseStatus === 'loading'
-                          ? 'bg-zinc-300 cursor-not-allowed'
-                          : 'bg-[#008CFF] hover:bg-[#0070CC]'
-                      }`}
-                    >
-                      {purchaseStatus === 'loading' 
-                        ? 'Processing...' 
-                        : `Purchase Membership for ${community.nftPrice} $GROW`}
-                    </button>
-                    
-                    {purchaseStatus === 'success' && (
+                    {purchaseStatus === 'success' ? (
                       <div className="mt-4 bg-green-50 text-green-600 p-4 rounded-lg text-sm">
-                        Membership purchased successfully! You are now a member of this community.
+                        <p>Membership purchased successfully! You are now a member of this community.</p>
+                        
+                        {membershipTokenId && (
+                          <div className="mt-2 border-t border-green-100 pt-2">
+                            <div className="flex items-center gap-2 mt-1">
+                              {/* <span>Token ID: {membershipTokenId}</span>
+                              <a 
+                                href={`https://sepolia-explorer.base.org/token/${community.nftContractAddress}?a=${membershipTokenId}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-600 hover:underline text-xs inline-flex items-center"
+                              >
+                                View on Explorer <span className="ml-1">↗</span>
+                              </a> */}
+                            </div>
+                          </div>
+                        )}
+                        
                         <div className="mt-3">
                           <Link href={`/communities/${communityId}/room`}>
                             <button className="w-full py-2 rounded-lg text-white transition-colors bg-[#008CFF] hover:bg-[#0070CC]">
@@ -971,12 +1063,28 @@ export default function CommunityDetail() {
                           </Link>
                         </div>
                       </div>
-                    )}
-                    
-                    {purchaseStatus === 'error' && purchaseError && (
-                      <div className="mt-4 bg-red-50 text-red-600 p-4 rounded-lg text-sm">
-                        {purchaseError}
-                      </div>
+                    ) : (
+                      <>
+                        <button
+                          onClick={handlePurchaseMembership}
+                          disabled={purchaseStatus === 'loading'}
+                          className={`w-full py-3 rounded-lg text-white transition-colors ${
+                            purchaseStatus === 'loading'
+                              ? 'bg-zinc-300 cursor-not-allowed'
+                              : 'bg-[#008CFF] hover:bg-[#0070CC]'
+                          }`}
+                        >
+                          {purchaseStatus === 'loading' 
+                            ? 'Processing...' 
+                            : `Purchase Membership for ${community.nftPrice} $GROW`}
+                        </button>
+                        
+                        {purchaseStatus === 'error' && purchaseError && (
+                          <div className="mt-4 bg-red-50 text-red-600 p-4 rounded-lg text-sm">
+                            {purchaseError}
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 )}

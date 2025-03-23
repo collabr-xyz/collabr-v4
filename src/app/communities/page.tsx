@@ -63,7 +63,7 @@ export default function Communities() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0); // Add a refresh key for manual refresh
-  const [sortOption, setSortOption] = useState<SortOption>('popular'); // Default sort option
+  const [sortOption, setSortOption] = useState<SortOption>('new'); // Default sort option changed to 'new'
   const [showSortMenu, setShowSortMenu] = useState(false); // For dropdown menu
   const activeAccount = useActiveAccount();
   

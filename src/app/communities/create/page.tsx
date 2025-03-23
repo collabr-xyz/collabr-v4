@@ -231,14 +231,14 @@ export default function CreateCommunity() {
           params: [
             updatedFormData.name, // clubName
             updatedFormData.description, // clubDescription
-            updatedFormData.image, // clubImageURI
+            updatedFormData.image, // clubImageURI - This image is used for both the club and NFT
             BigInt(membershipLimit), // membershipLimit
             priceInTokens, // membershipPrice (already in correct format with 18 decimals)
             updatedFormData.nftName || `${updatedFormData.name} Membership`, // nftName
             updatedFormData.nftSymbol || updatedFormData.name.substring(0, 4).toUpperCase(), // nftSymbol
             GROW_TOKEN_ADDRESS // paymentToken
           ],
-          gas: 5000000n, // Higher gas limit for contract deployment
+          gas: 15000000n, // Increased gas limit for contract deployment to handle reentrancy sentry
         });
         
         const deployResult = await sendTransaction(deployTx);
@@ -284,6 +284,7 @@ export default function CreateCommunity() {
           membershipLimit,
           nftContractAddress: newContractAddress, // Use the new unique contract address
           nftPrice,
+          nftImage: updatedFormData.image, // Store the same image URL for the NFT
           paymentTokenAddress: GROW_TOKEN_ADDRESS,
           paymentTokenSymbol: "GROW",
           creatorAddress: activeAccount.address,
@@ -313,6 +314,8 @@ export default function CreateCommunity() {
           isLoading: false, 
           error: "Failed to deploy membership contract. Please try again."
         }));
+        // Don't proceed to Firebase operations when contract deployment fails
+        return;
       }
     } catch (error) {
       console.error("Error creating community:", error);
@@ -448,6 +451,9 @@ export default function CreateCommunity() {
                   </div>
                   <p className="text-xs text-zinc-500 mt-1">
                     Upload an image or provide a URL for your club's image (required)
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    This image will be used for both the club and membership NFT
                   </p>
                 </div>
                 

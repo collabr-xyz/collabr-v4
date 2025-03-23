@@ -7,7 +7,7 @@ import Link from "next/link";
 import { ConnectButton, useActiveAccount } from "thirdweb/react";
 import { client } from "../../../../client";
 import { db } from "../../../../lib/firebase";
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp, query, getDocs, collection, where, writeBatch, addDoc } from "firebase/firestore";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 interface CommunityProfile {
@@ -53,7 +53,6 @@ export default function ProfileSetup() {
   const [communityProfile, setCommunityProfile] = useState<CommunityProfile | null>(null);
   const [customAvatarFile, setCustomAvatarFile] = useState<File | null>(null);
   const [customAvatarUrl, setCustomAvatarUrl] = useState<string | null>(null);
-  const [isEditMode, setIsEditMode] = useState(false);
 
   // Fetch community and user profile data
   useEffect(() => {
@@ -62,12 +61,9 @@ export default function ProfileSetup() {
     async function fetchData() {
       setIsLoading(true);
       try {
-        // Check if we're in edit mode from the room page
-        const isFromRoomEdit = sessionStorage.getItem('profileEditMode') === 'true';
-        if (isFromRoomEdit) {
-          console.log("Detected edit mode from chat room");
-          setIsEditMode(true);
-          // Clear the flag
+        // Remove edit mode handling since profiles can't be edited
+        if (sessionStorage.getItem('profileEditMode') === 'true') {
+          console.log("Edit mode detected but profiles cannot be edited. Clearing flag.");
           sessionStorage.removeItem('profileEditMode');
         }
         
@@ -94,12 +90,19 @@ export default function ProfileSetup() {
         if (profileSnapshot.exists()) {
           const profileData = profileSnapshot.data() as CommunityProfile;
           setCommunityProfile(profileData);
-          setIsEditMode(profileData.isProfileComplete);
           
           // If user already has a complete profile, redirect to community room
+          // Profiles cannot be edited once created
           if (profileData.isProfileComplete) {
-            // Stay on page in edit mode instead of redirecting
-            // router.push(`/communities/${communityId}/room`);
+            console.log("User already has a complete profile. Redirecting to room.");
+            // Show message before redirecting
+            setErrorMessage("Profiles cannot be edited once created. Redirecting to community room...");
+            
+            setTimeout(() => {
+              router.push(`/communities/${communityId}/room`);
+            }, 2000);
+            
+            return;
           }
         }
       } catch (error) {
@@ -171,8 +174,84 @@ export default function ProfileSetup() {
       // Use set with merge option instead of updateDoc to ensure all fields are saved properly
       await setDoc(profileRef, profileToSave as { [x: string]: any }, { merge: true });
       
+      // Check if avatar was updated
+      const avatarChanged = profileData.avatar && (!communityProfile?.avatar || profileData.avatar !== communityProfile.avatar);
+      
+      if (avatarChanged) {
+        try {
+          console.log("Avatar changed, updating sender avatar in previous messages...");
+          
+          // Create a query to find all messages from this user in this community
+          const messagesQuery = query(
+            collection(db, "messages"),
+            where("communityId", "==", communityId),
+            where("senderAddress", "==", activeAccount.address)
+          );
+          
+          // Get all messages from this user
+          const messagesSnapshot = await getDocs(messagesQuery);
+          
+          // Batch updates for better performance
+          const batch = writeBatch(db);
+          let updateCount = 0;
+          
+          messagesSnapshot.forEach((messageDoc) => {
+            // Update senderAvatar field in each message
+            batch.update(messageDoc.ref, {
+              senderAvatar: profileData.avatar,
+              senderName: profileData.displayName || messageDoc.data().senderName // Also update name if provided
+            });
+            updateCount++;
+          });
+          
+          // Commit the batch if there are updates
+          if (updateCount > 0) {
+            await batch.commit();
+            console.log(`Updated avatar in ${updateCount} previous messages`);
+          }
+        } catch (error) {
+          console.error("Failed to update avatar in previous messages:", error);
+          // Continue with profile update even if message update fails
+        }
+      }
+      
       // Update local state
       setCommunityProfile(profileToSave);
+      
+      // Also update the member record in the members collection
+      try {
+        // Check if a member record exists for this user
+        const membersQuery = query(
+          collection(db, "members"),
+          where("communityId", "==", communityId),
+          where("walletAddress", "==", activeAccount.address.toLowerCase())
+        );
+        
+        const memberSnapshot = await getDocs(membersQuery);
+        
+        if (!memberSnapshot.empty) {
+          // Update existing member record
+          const memberDoc = memberSnapshot.docs[0];
+          await updateDoc(memberDoc.ref, {
+            displayName: profileData.displayName || activeAccount.address.slice(0, 6) + '...' + activeAccount.address.slice(-4),
+            avatarUrl: profileData.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${activeAccount.address}`
+          });
+          console.log("Updated member record with new profile data");
+        } else {
+          // Create new member record if it doesn't exist
+          await addDoc(collection(db, "members"), {
+            communityId: communityId,
+            walletAddress: activeAccount.address.toLowerCase(),
+            displayName: profileData.displayName || activeAccount.address.slice(0, 6) + '...' + activeAccount.address.slice(-4),
+            avatarUrl: profileData.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${activeAccount.address}`,
+            joinedAt: new Date().toISOString()
+          });
+          console.log("Created new member record with profile data");
+        }
+      } catch (error) {
+        console.error("Failed to update member record:", error);
+        // Continue anyway since the profile was saved
+      }
       
       // Set flag to indicate profile was just updated
       sessionStorage.setItem('returnedFromProfileSetup', communityId);
@@ -220,20 +299,12 @@ export default function ProfileSetup() {
         <div className="flex justify-between items-center mb-8">
           <div>
             <h1 className="text-2xl font-medium">
-              {isEditMode ? 'Edit Your Profile' : 'Create Your Community Profile'}
+              Create Your Community Profile
             </h1>
             <p className="text-zinc-500 mt-1 text-sm">
               {community?.name ? `for ${community.name}` : ''}
             </p>
           </div>
-          {isEditMode && (
-            <Link 
-              href={`/communities/${communityId}/room`} 
-              className="text-sm text-zinc-500 hover:text-zinc-800 transition"
-            >
-              Back to Community
-            </Link>
-          )}
         </div>
 
         {errorMessage && (
@@ -244,24 +315,26 @@ export default function ProfileSetup() {
 
         <div className="bg-white border border-zinc-200 rounded-lg p-6 mb-6">
           <div className="text-sm text-gray-600 mb-6">
-            {isEditMode 
-              ? "Update your profile information for this community."
-              : community?.name 
-                ? <p>Welcome to <span className="font-medium">{community.name}</span>! Please set up your profile for this community. This profile will only be visible within this community.</p>
-                : "Set up your profile for this community. This profile will only be visible within this community."
+            {community?.name 
+              ? <p>Welcome to <span className="font-medium">{community.name}</span>! Please set up your profile for this community. This profile will only be visible within this community.</p>
+              : "Set up your profile for this community. This profile will only be visible within this community."
             }
           </div>
           
-          {!isEditMode && (
-            <div className="bg-yellow-50 text-yellow-800 p-4 rounded-md mb-6 text-sm flex items-start">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 mt-0.5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-              </svg>
-              <div>
-                <strong>Profile Required:</strong> You must complete your profile before you can participate in this community. This helps build trust and recognition among community members.
-              </div>
+          <div className="bg-yellow-50 text-yellow-800 p-4 rounded-md mb-6 text-sm flex items-start">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 mt-0.5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+            </svg>
+            <div>
+              <strong>Profile Required:</strong> You must complete your profile before you can participate in this community. This helps build trust and recognition among community members.
             </div>
-          )}
+          </div>
+          
+          {/* Add permanent profile warning */}
+          <div className="bg-red-400 text-white p-4 rounded-md mb-6">
+            <p className="font-medium">⚠️ Important: Once created, profiles cannot be changed</p>
+            <p className="text-sm mt-1">Please choose your display name and avatar carefully as they will be permanent for this community.</p>
+          </div>
           
           <form onSubmit={(e) => {
             e.preventDefault();
@@ -273,7 +346,6 @@ export default function ProfileSetup() {
             const discord = formData.get('discord') as string;
             const telegram = formData.get('telegram') as string;
             const website = formData.get('website') as string;
-            const avatarType = formData.get('avatarType') as string;
             
             // Build profile data
             const profileData: Partial<CommunityProfile> = {
@@ -287,15 +359,98 @@ export default function ProfileSetup() {
               }
             };
             
-            // Set avatar based on selected type
-            if (avatarType === 'default') {
-              profileData.avatar = `https://api.dicebear.com/7.x/identicon/svg?seed=${activeAccount.address}`;
-            } else if (avatarType === 'custom' && customAvatarUrl) {
+            // Set avatar based on whether a custom avatar was uploaded
+            if (customAvatarUrl) {
               profileData.avatar = customAvatarUrl;
+            } else {
+              // Ensure it's a properly formatted URL
+              profileData.avatar = `https://api.dicebear.com/7.x/identicon/svg?seed=${activeAccount.address}`;
             }
             
             handleProfileSave(profileData);
           }} className="space-y-6">
+            {/* Avatar Selection */}
+              <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Profile Avatar
+              </label>
+              
+              <div className="flex items-start">
+                <div className="flex items-center space-x-3">
+                  {/* Current avatar display */}
+                  <div className="w-12 h-12 rounded-full overflow-hidden border border-gray-200">
+                    {customAvatarFile ? (
+                      <Image
+                        src={URL.createObjectURL(customAvatarFile)}
+                        alt="Custom avatar preview"
+                        width={48}
+                        height={48}
+                        className="object-cover"
+                      />
+                    ) : communityProfile?.avatar && !communityProfile.avatar.includes('dicebear') ? (
+                      <Image
+                        src={communityProfile.avatar}
+                        alt="Current avatar"
+                        width={48}
+                        height={48}
+                        className="object-cover"
+                      />
+                    ) : (
+                      <div className="bg-blue-100 w-full h-full flex items-center justify-center">
+                        <img
+                          src={`https://api.dicebear.com/7.x/identicon/svg?seed=${activeAccount?.address}`}
+                          alt="Default avatar"
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Upload button */}
+                  <div>
+                    <label 
+                      htmlFor="avatarUpload"
+                      className="cursor-pointer inline-flex items-center px-3 py-1 border border-gray-300 shadow-sm text-xs font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                    >
+                      {customAvatarFile || (communityProfile?.avatar && !communityProfile.avatar.includes('dicebear')) 
+                        ? 'Change Image' 
+                        : 'Upload Custom Image'}
+                    </label>
+                    {(customAvatarFile || (communityProfile?.avatar && !communityProfile.avatar.includes('dicebear'))) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCustomAvatarFile(null);
+                          setCustomAvatarUrl(null);
+                        }}
+                        className="ml-2 text-xs text-red-500 hover:text-red-700"
+                      >
+                        Reset to Default
+                      </button>
+                    )}
+                    <p className="mt-1 text-xs text-gray-500">
+                      Default avatar will be used if no image is uploaded
+                    </p>
+                  </div>
+                </div>
+                
+                <input
+                  type="file"
+                  id="avatarUpload"
+                  accept="image/*"
+                  onChange={handleAvatarUpload}
+                  className="hidden"
+                />
+                
+                {/* Hidden field to track avatar type */}
+                <input 
+                  type="hidden" 
+                  name="avatarType" 
+                  value={customAvatarUrl ? 'custom' : 'default'} 
+                />
+              </div>
+            </div>
+
             <div>
               <label htmlFor="displayName" className="block text-sm font-medium text-gray-700 mb-1">
                 Display Name*
@@ -323,101 +478,6 @@ export default function ProfileSetup() {
                 placeholder="Tell others about yourself..."
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
               />
-            </div>
-            
-            {/* Avatar Selection */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Profile Avatar
-              </label>
-              
-              <div className="space-y-3">
-                <div className="flex items-center">
-                  <input
-                    type="radio"
-                    id="avatarDefault"
-                    name="avatarType"
-                    value="default"
-                    defaultChecked={!communityProfile?.avatar || communityProfile.avatar.includes('dicebear')}
-                    className="h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  <label htmlFor="avatarDefault" className="ml-2 block text-sm text-gray-700">
-                    Use default avatar
-                  </label>
-                </div>
-                
-                <div className="flex items-start">
-                  <div className="flex items-center h-5">
-                    <input
-                      type="radio"
-                      id="avatarCustom"
-                      name="avatarType"
-                      value="custom"
-                      defaultChecked={!!communityProfile?.avatar && !communityProfile.avatar.includes('dicebear')}
-                      className="h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div className="ml-2 text-sm">
-                    <label htmlFor="avatarCustom" className="font-medium text-gray-700">
-                      Upload custom avatar
-                    </label>
-                    {customAvatarFile ? (
-                      <div className="mt-2 flex items-center">
-                        <div className="w-12 h-12 rounded-full overflow-hidden">
-                          <Image
-                            src={URL.createObjectURL(customAvatarFile)}
-                            alt="Custom avatar preview"
-                            width={48}
-                            height={48}
-                            className="object-cover"
-                          />
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setCustomAvatarFile(null)}
-                          className="ml-2 text-xs text-red-500 hover:text-red-700"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ) : communityProfile?.avatar && !communityProfile.avatar.includes('dicebear') ? (
-                      <div className="mt-2 flex items-center">
-                        <div className="w-12 h-12 rounded-full overflow-hidden">
-                          <Image
-                            src={communityProfile.avatar}
-                            alt="Current avatar"
-                            width={48}
-                            height={48}
-                            className="object-cover"
-                          />
-                        </div>
-                        <label 
-                          htmlFor="avatarUpload"
-                          className="ml-2 cursor-pointer text-xs text-blue-500 hover:text-blue-700"
-                        >
-                          Change
-                        </label>
-                      </div>
-                    ) : (
-                      <div className="mt-1">
-                        <label 
-                          htmlFor="avatarUpload"
-                          className="cursor-pointer inline-flex items-center px-3 py-1 border border-gray-300 shadow-sm text-xs font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                        >
-                          Choose file
-                        </label>
-                      </div>
-                    )}
-                    <input
-                      type="file"
-                      id="avatarUpload"
-                      accept="image/*"
-                      onChange={handleAvatarUpload}
-                      className="hidden"
-                    />
-                  </div>
-                </div>
-              </div>
             </div>
             
             {/* Social Links */}
@@ -498,7 +558,7 @@ export default function ProfileSetup() {
                 type="submit"
                 className="w-full px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
               >
-                {isEditMode ? 'Update Profile' : 'Create Profile'}
+                Create Profile
               </button>
             </div>
           </form>
