@@ -3,9 +3,38 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { doc, getDoc, collection, query, where, getDocs, addDoc, onSnapshot, orderBy, Timestamp, setDoc, limit } from 'firebase/firestore';
 import { db } from '../../../lib/firebase';
-import { useActiveAccount } from "thirdweb/react";
+import { useActiveAccount, ConnectButton } from "thirdweb/react";
+import { getContract, readContract, defineChain } from "thirdweb";
+import { client } from '../../../client';
 import Link from 'next/link';
 import Image from 'next/image';
+
+// Define Base Sepolia testnet
+const baseSepolia = defineChain({
+  id: 84532,
+  name: "Base Sepolia",
+  rpc: "https://sepolia.base.org",
+  rpcUrls: {
+    default: {
+      http: ["https://sepolia.base.org"],
+    },
+    public: {
+      http: ["https://sepolia.base.org"],
+    },
+  },
+  nativeCurrency: {
+    name: "Ethereum",
+    symbol: "ETH",
+    decimals: 18,
+  },
+  blockExplorers: {
+    default: {
+      name: "BaseScan",
+      url: "https://sepolia-explorer.base.org",
+    },
+  },
+  testnet: true,
+});
 
 interface Community {
   id: string;
@@ -81,6 +110,10 @@ export default function ChatRoom() {
   const [currentUserMember, setCurrentUserMember] = useState<Member | null>(null);
   const [previousAccountAddress, setPreviousAccountAddress] = useState<string | null>(null);
   const [isAccountFluctuating, setIsAccountFluctuating] = useState(false);
+  const [totalStakedTokens, setTotalStakedTokens] = useState<string | null>(null);
+  const [userStakedTokens, setUserStakedTokens] = useState<string | null>(null);
+  const [fetchingTokens, setFetchingTokens] = useState(false);
+  const [stakingSupported, setStakingSupported] = useState<boolean | null>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
@@ -91,12 +124,12 @@ export default function ChatRoom() {
   // Add refs to track effect states and prevent infinite loops
   const initialProfileRefreshRef = useRef(false);
   const refreshingMembersRef = useRef(false);
+  const reconnectAttemptedRef = useRef(false); // Track if we've attempted reconnection
   
   // Add loading timeout to prevent infinite loading
   useEffect(() => {
     const loadingTimeout = setTimeout(() => {
       if (loading) {
-        console.log("Loading timeout reached - forcing load completion");
         setLoading(false);
         if (!error) {
           setError("The chat room is taking too long to load. Please refresh the page.");
@@ -107,13 +140,41 @@ export default function ChatRoom() {
     return () => clearTimeout(loadingTimeout);
   }, [loading, error]);
   
+  // Add auto-reconnect effect
+  useEffect(() => {
+    // Only attempt reconnect once and only if wallet is not already connected
+    if (!activeAccount?.address && !reconnectAttemptedRef.current) {
+      reconnectAttemptedRef.current = true;
+      
+      // Check if we have a stored community membership
+      const lastMemberAccount = localStorage.getItem('lastMemberAccount_' + communityId);
+      const storedMemberStatus = sessionStorage.getItem('wasEverMember_' + communityId);
+      
+      if (lastMemberAccount && storedMemberStatus === 'true') {
+        console.log("Found stored wallet for this community, attempting to prompt reconnection");
+        
+        // We can't directly reconnect, but we can set a flag in session to show it was attempted
+        sessionStorage.setItem('reconnectAttempted_' + communityId, 'true');
+        
+        // We also update the UI state to show we're trying to reconnect
+        setIsAccountFluctuating(true);
+        
+        // After a delay, if still not connected, show the proper disconnected state
+        setTimeout(() => {
+          if (!activeAccount?.address) {
+            setIsAccountFluctuating(false);
+          }
+        }, 3000);
+      }
+    }
+  }, [activeAccount?.address, communityId]);
+  
   // Check if Firestore is properly initialized
   useEffect(() => {
     try {
       // Simple test query to see if Firestore is working
       const testRef = doc(db, "_test", "test");
       getDoc(testRef).then(() => {
-        console.log("Firestore connection successful");
       }).catch(err => {
         console.error("Firestore connection error:", err);
         setError("Error connecting to the chat database. Please try again later.");
@@ -130,13 +191,11 @@ export default function ChatRoom() {
     
     // Return immediately if we're already refreshing to prevent cascading refreshes
     if (refreshingMembersRef.current) {
-      console.log("Skipping duplicate members refresh - already in progress");
       return;
     }
     
     try {
       refreshingMembersRef.current = true;
-      console.log("Refreshing members list after profile update");
       // Create a Map to ensure unique members by wallet address
       const membersMap = new Map<string, Member>();
       
@@ -171,7 +230,6 @@ export default function ChatRoom() {
       }
       
       // 3. Always fetch fresh profile data for each member (don't rely on cached data)
-      console.log("Fetching latest profile data for all members...");
       const profilePromises = Array.from(membersMap.entries()).map(async ([walletAddress, member]) => {
         try {
           // Always get fresh profile data from Firestore
@@ -182,22 +240,19 @@ export default function ChatRoom() {
             const profileData = profileSnapshot.data();
             if (profileData.displayName) {
               member.displayName = profileData.displayName;
-              console.log(`Updated display name for ${walletAddress}: ${profileData.displayName}`);
             }
             // Use the correct property name 'avatar' from the profile data
             if (profileData.avatar) {
               member.avatarUrl = profileData.avatar;
-              console.log(`Updated avatar for ${walletAddress}: ${profileData.avatar}`);
               
               // Pre-load the image to check if it's valid
               const img = document.createElement('img');
               img.width = 40;
               img.height = 40;
               img.src = profileData.avatar;
-              img.onload = () => console.log(`Successfully pre-loaded avatar for ${walletAddress}`);
+              img.onload = () => {};
               img.onerror = () => {
                 console.error(`Failed to pre-load avatar for ${walletAddress}, will use fallback`);
-                // Don't update here, let the error handling in the component handle it
               };
             }
           }
@@ -205,7 +260,6 @@ export default function ChatRoom() {
           // If this is the creator and they don't have a profile name, use "Creator" as fallback
           if (community?.creatorAddress?.toLowerCase() === walletAddress && !member.displayName) {
             member.displayName = "Creator";
-            console.log(`Using fallback name "Creator" for community creator: ${walletAddress}`);
           }
           
           return member;
@@ -226,7 +280,6 @@ export default function ChatRoom() {
       
       // Convert Map to array
       const updatedMembersData = Array.from(membersMap.values());
-      console.log(`Updated member count: ${updatedMembersData.length}`);
       
       // Force UI update by creating a new array
       setMembers([...updatedMembersData]);
@@ -254,7 +307,6 @@ export default function ChatRoom() {
         
         // Only refresh URLs that aren't the default avatars
         if (!currentSrc.includes('dicebear')) {
-          console.log(`Refreshing avatar image ${index + 1}:`, currentSrc);
           imgElement.src = `${currentSrc}?t=${Date.now()}`;
         }
       });
@@ -279,7 +331,6 @@ export default function ChatRoom() {
       // First check if they're actually a member in the database
       const checkDirectMembership = async () => {
         try {
-          console.log("Doing direct membership check for profile verification");
           const directMemberQuery = query(
             collection(db, "members"), 
             where("communityId", "==", communityId),
@@ -288,7 +339,6 @@ export default function ChatRoom() {
           const directMemberSnapshot = await getDocs(directMemberQuery);
           
           if (directMemberSnapshot.empty) {
-            console.log("User is definitely not a member, skipping profile check");
             return;
           }
           
@@ -305,32 +355,25 @@ export default function ChatRoom() {
     
     async function checkProfile() {
       try {
-        console.log("Checking profile completion for address:", activeAccount?.address);
-        
         // Check if user has a profile for this community
         const profileRef = doc(db, "communities", communityId, "profiles", activeAccount?.address || "");
         const profileSnapshot = await getDoc(profileRef);
         
         if (profileSnapshot.exists()) {
           const profileData = profileSnapshot.data();
-          console.log("Profile found:", profileData);
           
           // Explicitly check the isProfileComplete field
           if (profileData.isProfileComplete === true) {
-            console.log("Profile is complete, user can access chat");
             setProfileChecked(true);
             // Don't call refreshMembers directly here to avoid loops
             // The profile check completion will trigger the profile refresh effect
             return; // Exit early if profile is complete
           } else {
-            console.log("Profile exists but is not complete:", profileData.isProfileComplete);
           }
         } else {
-          console.log("No profile found for user");
         }
         
         // If we reach here, the profile either doesn't exist or is not complete
-        console.log("Showing profile completion modal");
         setShowProfileModal(true);
         
         setProfileChecked(true);
@@ -409,7 +452,13 @@ export default function ChatRoom() {
       try {
         const communityDoc = await getDoc(doc(db, "communities", communityId));
         if (communityDoc.exists()) {
-          setCommunity({ id: communityDoc.id, ...communityDoc.data() } as Community);
+          const communityData = { id: communityDoc.id, ...communityDoc.data() } as Community;
+          setCommunity(communityData);
+          
+          // Fetch staked tokens if we have the contract address
+          if (communityData.nftContractAddress) {
+            fetchStakedTokens(communityData.nftContractAddress);
+          }
         } else {
           setError("Community not found");
         }
@@ -420,6 +469,94 @@ export default function ChatRoom() {
     }
     fetchCommunity();
   }, [communityId]);
+  
+  // Function to fetch staked tokens
+  const fetchStakedTokens = async (contractAddress: string) => {
+    try {
+      setFetchingTokens(true);
+      
+      // Get the contract instance
+      const contract = getContract({
+        client,
+        address: contractAddress,
+        chain: baseSepolia,
+      });
+      
+      // Check if contract supports staking functions before calling them
+      let supportsStaking = false;
+      try {
+        // Try to call a simple view function to test if staking is implemented
+        await readContract({
+          contract,
+          method: "function totalStakedTokens() view returns (uint256)",
+          params: []
+        });
+        supportsStaking = true;
+        setStakingSupported(true);
+      } catch (error) {
+        console.log("This contract does not support staking features", error);
+        supportsStaking = false;
+        setStakingSupported(false);
+        // Set default values if staking is not supported
+        setTotalStakedTokens("0");
+        setUserStakedTokens("0");
+        return; // Exit early if staking is not supported
+      }
+      
+      if (supportsStaking) {
+        // Fetch total staked tokens
+        try {
+          const stakedTokens = await readContract({
+            contract,
+            method: "function totalStakedTokens() view returns (uint256)",
+            params: []
+          });
+          
+          // Convert from wei to tokens with 2 decimal places for display
+          const stakedTokensInEther = (Number(stakedTokens) / 1e18).toFixed(2);
+          setTotalStakedTokens(stakedTokensInEther);
+        } catch (stakedTokensError) {
+          console.error("Error fetching total staked tokens:", stakedTokensError);
+          // Set a default value to prevent UI from breaking
+          setTotalStakedTokens("0");
+        }
+        
+        // Fetch user's staked tokens if user is connected
+        if (activeAccount?.address) {
+          try {
+            const userStaked = await readContract({
+              contract,
+              method: "function getStakedTokens(address) view returns (uint256)",
+              params: [activeAccount.address]
+            });
+            
+            // Convert from wei to tokens with 2 decimal places for display
+            const userStakedInEther = (Number(userStaked) / 1e18).toFixed(2);
+            setUserStakedTokens(userStakedInEther);
+          } catch (userStakedError) {
+            console.error("Error fetching user staked tokens:", userStakedError);
+            // Set a default value to prevent UI from breaking
+            setUserStakedTokens("0");
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Error fetching staked tokens:", err);
+      // Set default values if the contract has issues
+      setTotalStakedTokens("0");
+      setUserStakedTokens("0");
+      setStakingSupported(false);
+    } finally {
+      setFetchingTokens(false);
+    }
+  };
+  
+  // Refresh staked tokens when account changes
+  useEffect(() => {
+    if (community?.nftContractAddress && activeAccount?.address) {
+      fetchStakedTokens(community.nftContractAddress);
+    }
+  }, [activeAccount?.address, community?.nftContractAddress]);
   
   // Handle account connection fluctuations
   useEffect(() => {
@@ -666,13 +803,11 @@ export default function ChatRoom() {
     // Don't wait for member status to be confirmed, just check if we're definitely not a member
     // Also skip subscription if we're in a fluctuation state to avoid unnecessary resubscribes
     if (userStatus === 'nonmember' && !wasEverMember) {
-      console.log('Not subscribing to messages - user is definitely not a member');
       return;
     }
     
     // If we already have an active subscription, don't create another one
     if (messageSubscriptionRef.current.active) {
-      console.log('Message subscription already active, skipping new subscription');
       return;
     }
     
@@ -939,20 +1074,15 @@ export default function ChatRoom() {
         
         if (profileSnapshot.exists()) {
           const profileData = profileSnapshot.data();
-          console.log("Profile data for sender:", profileData);
           
           if (profileData.displayName) {
             senderName = profileData.displayName;
-            console.log("Using display name from profile:", senderName);
           }
           if (profileData.avatar) {
             senderAvatar = profileData.avatar;
-            console.log("Using avatar from profile:", senderAvatar);
           } else {
-            console.log("No avatar found in profile, using fallback");
           }
         } else {
-          console.log("No profile found for sender");
         }
       } catch (err) {
         console.error("Error getting sender profile:", err);
@@ -1394,6 +1524,64 @@ export default function ChatRoom() {
           </div>
         </div>
         
+        {/* Staked Tokens Section */}
+        <div className="mb-6">
+          <div className="text-xs uppercase text-zinc-500 font-medium mb-2 flex justify-between items-center">
+            <span>Staked Tokens</span>
+            {community?.nftContractAddress && (
+              <button 
+                onClick={() => fetchStakedTokens(community.nftContractAddress)} 
+                className="text-xs text-zinc-400 hover:text-[#008CFF]"
+                title="Refresh staked tokens"
+                disabled={fetchingTokens}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className={`h-3 w-3 ${fetchingTokens ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </button>
+            )}
+          </div>
+          
+          <div className="bg-white border border-gray-200 rounded-md p-3">
+            {stakingSupported === false ? (
+              <div className="text-sm text-zinc-500 text-center py-1">
+                Staking not available for this community
+              </div>
+            ) : (
+              <>
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-sm text-zinc-600">Total Staked:</span>
+                  {fetchingTokens ? (
+                    <div className="animate-pulse h-4 w-16 bg-gray-200 rounded"></div>
+                  ) : (
+                    <span className="text-sm font-medium">{totalStakedTokens || '0'} $GROW</span>
+                  )}
+                </div>
+                
+                {activeAccount?.address && userStakedTokens && Number(userStakedTokens) > 0 && (
+                  <div className="flex justify-between items-center pt-2 border-t border-gray-100">
+                    <span className="text-sm text-zinc-600">Your Stake:</span>
+                    {fetchingTokens ? (
+                      <div className="animate-pulse h-4 w-16 bg-gray-200 rounded"></div>
+                    ) : (
+                      <span className="text-sm font-medium">{userStakedTokens} $GROW</span>
+                    )}
+                  </div>
+                )}
+                
+                {/* Add Manage Stake link */}
+                {activeAccount?.address && userStatus === 'member' && stakingSupported && (
+                  <div className="mt-3 pt-2 border-t border-gray-100">
+                    <Link href={`/communities/${communityId}`} className="text-xs text-[#008CFF] hover:underline">
+                      Manage your stake →
+                    </Link>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+        
         {/* Upcoming Events Section */}
         <div className="mb-6">
           <div className="text-xs uppercase text-zinc-500 font-medium mb-2">Upcoming Events</div>
@@ -1493,13 +1681,40 @@ export default function ChatRoom() {
                'Wallet Disconnected'}
             </span>
             
+            {/* Add Reconnect button when wallet is disconnected */}
+            {!activeAccount?.address && !isAccountFluctuating && (
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => {
+                    // Create a refresh URL that preserves our current page
+                    const url = new URL(window.location.href);
+                    // Add a timestamp parameter to force a refresh
+                    url.searchParams.set('refresh', Date.now().toString());
+                    window.location.href = url.toString();
+                  }}
+                  className="text-xs text-blue-500 hover:text-blue-700 underline"
+                >
+                  Refresh
+                </button>
+                <div className="ml-2">
+                  <ConnectButton
+                    client={require("../../../client").client}
+                    appMetadata={{
+                      name: "Collabr",
+                      url: "https://collabr.xyz",
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+            
             <div className={`h-2.5 w-2.5 rounded-full mr-1.5 ${
               connectionStatus === 'connected' ? 'bg-green-500' : 
               connectionStatus === 'connecting' ? 'bg-yellow-500 animate-pulse' : 
               'bg-red-500'
             }`}></div>
             <span className="text-xs text-zinc-500">
-              {connectionStatus === 'connected' ? 'Connected' : 
+              {connectionStatus === 'connected' ? 'Community Connected' : 
                connectionStatus === 'connecting' ? 'Connecting...' : 
                'Connection Error'}
             </span>
@@ -1539,7 +1754,7 @@ export default function ChatRoom() {
                         width={40}
                         height={40}
                         className="w-full h-full object-cover" 
-                        onLoadingComplete={() => console.log(`Message avatar loaded successfully for ${message.senderAddress}`)}
+                        onLoadingComplete={() => {}}
                         onError={(e) => {
                           console.error(`Failed to load message avatar for ${message.senderAddress}:`, currentAvatar);
                           // Fall back to default avatar URL
@@ -1724,7 +1939,7 @@ export default function ChatRoom() {
                           width={40}
                           height={40}
                           className="w-full h-full object-cover"
-                          onLoadingComplete={() => console.log(`Avatar loaded successfully for ${currentMember.walletAddress}`)}
+                          onLoadingComplete={() => {}}
                           onError={(e) => {
                             console.error(`Failed to load avatar image for ${currentMember.walletAddress}:`, currentMember.avatarUrl);
                             // Fall back to default avatar
@@ -1770,6 +1985,11 @@ export default function ChatRoom() {
                           <span className="ml-2 text-xs bg-blue-50 text-[#008CFF] px-1.5 py-0.5 rounded">Host</span>
                         )}
                       </div>
+                      {userStakedTokens && stakingSupported && Number(userStakedTokens) > 0 && (
+                        <div className="text-xs text-zinc-500 mt-1">
+                          Staked: {userStakedTokens} $GROW
+                        </div>
+                      )}
                       {debugStatus}
                     </div>
                   </>
@@ -1800,7 +2020,7 @@ export default function ChatRoom() {
                         width={32}
                         height={32}
                         className="w-full h-full object-cover" 
-                        onLoadingComplete={() => console.log(`Avatar loaded successfully for ${member.walletAddress}`)}
+                        onLoadingComplete={() => {}}
                         onError={(e) => {
                           console.error(`Failed to load avatar image for ${member.walletAddress}:`, member.avatarUrl);
                           // Update with fallback avatar URL
@@ -1894,11 +2114,7 @@ export default function ChatRoom() {
             </div>
             
             <div className="bg-yellow-50 text-yellow-800 p-3 rounded-md mb-4 text-sm">
-              <p><strong>Note:</strong> Profile completion is required to participate in this community.</p>
-            </div>
-            
-            <div className="bg-red-50 text-red-700 p-3 rounded-md mb-4 text-sm">
-              <p><strong>Important:</strong> Once your profile is created, it cannot be changed in the future. Please choose your display name and avatar carefully.</p>
+              <p><strong>Note:</strong> Once your profile is created, it cannot be changed in the future. Please choose your display name and avatar carefully.</p>
             </div>
             
             <div className="mt-6 text-center">

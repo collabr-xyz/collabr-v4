@@ -24,6 +24,7 @@ interface CommunityProfile {
     discord?: string;
     telegram?: string;
     website?: string;
+    farcaster?: string;
   };
   customFields?: { [key: string]: string };
 }
@@ -330,12 +331,6 @@ export default function ProfileSetup() {
             </div>
           </div>
           
-          {/* Add permanent profile warning */}
-          <div className="bg-red-400 text-white p-4 rounded-md mb-6">
-            <p className="font-medium">⚠️ Important: Once created, profiles cannot be changed</p>
-            <p className="text-sm mt-1">Please choose your display name and avatar carefully as they will be permanent for this community.</p>
-          </div>
-          
           <form onSubmit={(e) => {
             e.preventDefault();
             const formData = new FormData(e.currentTarget);
@@ -487,7 +482,12 @@ export default function ProfileSetup() {
               <div className="space-y-4">
                 <div>
                   <label htmlFor="twitter" className="block text-sm text-gray-700 mb-1">
-                    Twitter
+                    <div className="flex items-center">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 mr-2 text-[#1DA1F2]">
+                        <path d="M23.953 4.57a10 10 0 01-2.825.775 4.958 4.958 0 002.163-2.723c-.951.555-2.005.959-3.127 1.184a4.92 4.92 0 00-8.384 4.482C7.69 8.095 4.067 6.13 1.64 3.162a4.822 4.822 0 00-.666 2.475c0 1.71.87 3.213 2.188 4.096a4.904 4.904 0 01-2.228-.616v.06a4.923 4.923 0 003.946 4.827 4.996 4.996 0 01-2.212.085 4.937 4.937 0 004.604 3.417 9.868 9.868 0 01-6.102 2.105c-.39 0-.779-.023-1.17-.067a13.995 13.995 0 007.557 2.209c9.054 0 13.999-7.496 13.999-13.986 0-.209 0-.42-.015-.63a9.936 9.936 0 002.46-2.548l-.047-.02z"/>
+                      </svg>
+                      Twitter
+                    </div>
                   </label>
                   <div className="flex rounded-md">
                     <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-gray-300 bg-gray-50 text-gray-500 text-xs">
@@ -506,7 +506,12 @@ export default function ProfileSetup() {
                 
                 <div>
                   <label htmlFor="discord" className="block text-sm text-gray-700 mb-1">
-                    Discord
+                    <div className="flex items-center">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 127.14 96.36" fill="#5865F2" className="w-4 h-4 mr-2">
+                        <path d="M107.7,8.07A105.15,105.15,0,0,0,81.47,0a72.06,72.06,0,0,0-3.36,6.83A97.68,97.68,0,0,0,49,6.83,72.37,72.37,0,0,0,45.64,0,105.89,105.89,0,0,0,19.39,8.09C2.79,32.65-1.71,56.6.54,80.21h0A105.73,105.73,0,0,0,32.71,96.36,77.7,77.7,0,0,0,39.6,85.25a68.42,68.42,0,0,1-10.85-5.18c.91-.66,1.8-1.34,2.66-2a75.57,75.57,0,0,0,64.32,0c.87.71,1.76,1.39,2.66,2a68.68,68.68,0,0,1-10.87,5.19,77,77,0,0,0,6.89,11.1A105.25,105.25,0,0,0,126.6,80.22h0C129.24,52.84,122.09,29.11,107.7,8.07ZM42.45,65.69C36.18,65.69,31,60,31,53s5-12.74,11.43-12.74S54,46,53.89,53,48.84,65.69,42.45,65.69Zm42.24,0C78.41,65.69,73.25,60,73.25,53s5-12.74,11.44-12.74S96.23,46,96.12,53,91.08,65.69,84.69,65.69Z"/>
+                      </svg>
+                      Discord
+                    </div>
                   </label>
                   <input
                     type="text"
@@ -520,7 +525,12 @@ export default function ProfileSetup() {
                 
                 <div>
                   <label htmlFor="telegram" className="block text-sm text-gray-700 mb-1">
-                    Telegram
+                    <div className="flex items-center">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#0088CC" className="w-4 h-4 mr-2">
+                        <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.248c-.186 1.754-.962 6.012-1.358 7.975-.165.828-.546 1.104-.882 1.128-.753.06-1.323-.482-2.054-.942-.996-.63-1.393-.942-2.356-1.547-1.29-.8-.358-1.307.285-2.07.168-.2 3.096-2.83 3.152-3.067.005-.02.013-.14-.054-.2s-.21-.05-.299-.028c-.127.03-2.134 1.35-6.023 4.03-.51.35-1.085.6-1.72.566-.634-.036-1.853-.36-2.76-.652-.916-.306-1.68-.468-1.617-.992.034-.275.322-.552.864-.84 3.34-1.465 5.567-2.43 6.682-2.892 3.185-1.33 3.85-1.56 4.285-1.56.076 0 .524.315.524.896-.055.145-.055.282-.054.41z"/>
+                      </svg>
+                      Telegram
+                    </div>
                   </label>
                   <div className="flex rounded-md">
                     <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-gray-300 bg-gray-50 text-gray-500 text-xs">
@@ -538,8 +548,40 @@ export default function ProfileSetup() {
                 </div>
                 
                 <div>
+                  <label htmlFor="farcaster" className="block text-sm text-gray-700 mb-1">
+                    <div className="flex items-center">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" fill="#8A63D2" className="w-4 h-4 mr-2">
+                        <path d="M0 20C0 8.954 8.954 0 20 0s20 8.954 20 20-8.954 20-20 20S0 31.046 0 20Z"/>
+                        <path fill="#fff" d="M20 8c6.627 0 12 5.373 12 12s-5.373 12-12 12-12-5.373-12-12S13.373 8 20 8Z"/>
+                        <path d="M14 14c0-1.105.832-2 1.857-2h4.286c1.025 0 1.857.895 1.857 2s-.832 2-1.857 2h-4.286C14.832 16 14 15.105 14 14ZM14 20c0-1.105.832-2 1.857-2h4.286c1.025 0 1.857.895 1.857 2s-.832 2-1.857 2h-4.286C14.832 22 14 21.105 14 20ZM14 26c0-1.105.832-2 1.857-2h4.286c1.025 0 1.857.895 1.857 2s-.832 2-1.857 2h-4.286C14.832 28 14 27.105 14 26Z"/>
+                        <path d="M24 14c0-1.105.832-2 1.857-2H28c1.025 0 2 .895 2 2s-.975 2-2 2h-2.143C24.832 16 24 15.105 24 14ZM24 20c0-1.105.832-2 1.857-2H28c1.025 0 2 .895 2 2s-.975 2-2 2h-2.143C24.832 22 24 21.105 24 20ZM24 26c0-1.105.832-2 1.857-2H28c1.025 0 2 .895 2 2s-.975 2-2 2h-2.143C24.832 28 24 27.105 24 26Z"/>
+                      </svg>
+                      Farcaster
+                    </div>
+                  </label>
+                  <div className="flex rounded-md">
+                    <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-gray-300 bg-gray-50 text-gray-500 text-xs">
+                      @
+                    </span>
+                    <input
+                      type="text"
+                      id="farcaster"
+                      name="farcaster"
+                      defaultValue={communityProfile?.socialLinks?.farcaster || ''}
+                      placeholder="username"
+                      className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-r-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
+                    />
+                  </div>
+                </div>
+                
+                <div>
                   <label htmlFor="website" className="block text-sm text-gray-700 mb-1">
-                    Website
+                    <div className="flex items-center">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#4A5568" className="w-4 h-4 mr-2">
+                        <path d="M21.721 12.752a9.711 9.711 0 00-.945-5.003 12.754 12.754 0 01-4.339 2.708 18.991 18.991 0 01-.214 4.772 17.165 17.165 0 005.498-2.477zM14.634 15.55a17.324 17.324 0 00.332-4.647c-.952.227-1.945.347-2.966.347-1.021 0-2.014-.12-2.966-.347a17.515 17.515 0 00.332 4.647 17.385 17.385 0 005.268 0zM9.772 17.119a18.963 18.963 0 004.456 0A17.182 17.182 0 0112 21.724a17.18 17.18 0 01-2.228-4.605zM7.777 15.23a18.87 18.87 0 01-.214-4.774 12.753 12.753 0 01-4.34-2.708 9.711 9.711 0 00-.944 5.004 17.165 17.165 0 005.498 2.477zM21.356 14.752a9.765 9.765 0 01-7.478 6.817 18.64 18.64 0 001.988-4.718 18.627 18.627 0 005.49-2.098zM2.644 14.752c1.682.971 3.53 1.688 5.49 2.099a18.64 18.64 0 001.988 4.718 9.765 9.765 0 01-7.478-6.816zM13.878 2.43a9.755 9.755 0 016.116 3.986 11.267 11.267 0 01-3.746 2.504 18.63 18.63 0 00-2.37-6.49zM12 2.276a17.152 17.152 0 012.805 7.121c-.897.23-1.837.353-2.805.353-.968 0-1.908-.122-2.805-.353A17.151 17.151 0 0112 2.276zM10.122 2.43a18.629 18.629 0 00-2.37 6.49 11.266 11.266 0 01-3.746-2.504 9.754 9.754 0 016.116-3.985z"/>
+                      </svg>
+                      Website
+                    </div>
                   </label>
                   <input
                     type="url"

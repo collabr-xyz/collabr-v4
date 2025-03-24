@@ -15,7 +15,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { doc, getDoc, collection, query, where, getDocs, addDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { ConnectButton, useActiveAccount, useSendTransaction } from "thirdweb/react";
@@ -69,6 +69,7 @@ export default function CommunityDetail() {
   const communityId = params.id as string;
   const activeAccount = useActiveAccount();
   const { mutate: sendTransaction } = useSendTransaction();
+  const router = useRouter();
   
   const [community, setCommunity] = useState<Community | null>(null);
   const [loading, setLoading] = useState(true);
@@ -84,6 +85,15 @@ export default function CommunityDetail() {
   const [memberCount, setMemberCount] = useState<number | null>(null);
   const [membershipTokenId, setMembershipTokenId] = useState<string | null>(null);
   const [isUserMember, setIsUserMember] = useState(false);
+  const [totalStakedTokens, setTotalStakedTokens] = useState<string | null>(null);
+  const [userStakedTokens, setUserStakedTokens] = useState<string | null>(null);
+  const [showStakeForm, setShowStakeForm] = useState(false);
+  const [stakeAmount, setStakeAmount] = useState("");
+  const [unstakeAmount, setUnstakeAmount] = useState("");
+  const [isStaking, setIsStaking] = useState(false);
+  const [isUnstaking, setIsUnstaking] = useState(false);
+  const [stakeError, setStakeError] = useState<string | null>(null);
+  const [stakeSuccess, setStakeSuccess] = useState(false);
   
   // Function to check if multiple communities share the same contract address
   async function checkForSharedContracts(contractAddress: string, currentCommunityId: string) {
@@ -152,6 +162,21 @@ export default function CommunityDetail() {
               
               setMemberCount(Number(totalMembers));
               
+              // Fetch total staked tokens
+              try {
+                const stakedTokens = await readContract({
+                  contract,
+                  method: "function totalStakedTokens() view returns (uint256)",
+                  params: []
+                });
+                
+                // Convert from wei to tokens with 2 decimal places for display
+                const stakedTokensInEther = (Number(stakedTokens) / 1e18).toFixed(2);
+                setTotalStakedTokens(stakedTokensInEther);
+              } catch (stakedTokensError) {
+                console.error("Error fetching total staked tokens:", stakedTokensError);
+              }
+              
               // Check if the active account is a member
               if (activeAccount) {
                 try {
@@ -178,6 +203,21 @@ export default function CommunityDetail() {
                       }
                     } catch (tokenIdError) {
                       console.error("Error retrieving NFT token ID:", tokenIdError);
+                    }
+                    
+                    // Get user's staked tokens
+                    try {
+                      const userStaked = await readContract({
+                        contract,
+                        method: "function getStakedTokens(address) view returns (uint256)",
+                        params: [activeAccount.address]
+                      });
+                      
+                      // Convert from wei to tokens with 2 decimal places for display
+                      const userStakedInEther = (Number(userStaked) / 1e18).toFixed(2);
+                      setUserStakedTokens(userStakedInEther);
+                    } catch (userStakedError) {
+                      console.error("Error fetching user staked tokens:", userStakedError);
                     }
                   }
                 } catch (membershipCheckError) {
@@ -614,6 +654,12 @@ export default function CommunityDetail() {
         } catch (error) {
           console.error("Error updating member count:", error);
         }
+        
+        // Auto-redirect to community room after successful purchase
+        setTimeout(() => {
+          console.log("Redirecting to community room...");
+          router.push(`/communities/${communityId}/room`);
+        }, 1000); // Small delay to ensure state is updated
       } catch (error) {
         console.error("Error during purchase transaction:", error);
         
@@ -751,6 +797,230 @@ export default function CommunityDetail() {
     }
   };
   
+  // Add function to handle staking tokens
+  const handleStakeTokens = async () => {
+    if (!activeAccount || !community || !isUserMember) return;
+    
+    try {
+      setIsStaking(true);
+      setStakeError(null);
+      setStakeSuccess(false);
+      
+      // Get the membership contract
+      const contract = getContract({
+        client,
+        address: community.nftContractAddress,
+        chain: baseSepolia,
+      });
+      
+      // Convert the stake amount to token units with 18 decimals
+      const amount = parseFloat(stakeAmount);
+      if (isNaN(amount) || amount <= 0) {
+        throw new Error("Please enter a valid amount to stake");
+      }
+      
+      const tokenAmount = BigInt(Math.floor(amount * 1e18));
+      console.log("Staking tokens amount:", tokenAmount.toString());
+      
+      // Get the GROW token address
+      const growTokenAddress = process.env.NEXT_PUBLIC_GROW_TOKEN_ADDRESS || "0x2d06C90890BfE06c0538F9bf5c76d3567341a7DA";
+      
+      // Get the GROW token contract
+      const tokenContract = getContract({
+        client,
+        address: growTokenAddress,
+        chain: baseSepolia,
+      });
+      
+      // Check user's token balance
+      const userBalance = await readContract({
+        contract: tokenContract,
+        method: "function balanceOf(address) view returns (uint256)",
+        params: [activeAccount.address]
+      });
+      
+      if (userBalance < tokenAmount) {
+        throw new Error(`Insufficient $GROW tokens. You need ${amount} but have ${Number(userBalance) / 1e18}.`);
+      }
+      
+      // Check if approval is needed
+      const currentAllowance = await readContract({
+        contract: tokenContract,
+        method: "function allowance(address,address) view returns (uint256)",
+        params: [activeAccount.address, community.nftContractAddress]
+      });
+      
+      // Approve tokens if needed
+      if (currentAllowance < tokenAmount) {
+        setStakeError("Please approve $GROW tokens to continue...");
+        
+        const approveTx = prepareContractCall({
+          contract: tokenContract,
+          method: "function approve(address,uint256)",
+          params: [community.nftContractAddress, tokenAmount],
+        });
+        
+        await sendTransaction(approveTx);
+        
+        // Wait for transaction to be processed
+        setStakeError("Waiting for approval confirmation...");
+        await new Promise(resolve => setTimeout(resolve, 15000));
+        
+        // Check if approval succeeded
+        const newAllowance = await readContract({
+          contract: tokenContract,
+          method: "function allowance(address,address) view returns (uint256)",
+          params: [activeAccount.address, community.nftContractAddress]
+        });
+        
+        if (newAllowance < tokenAmount) {
+          throw new Error("Token approval failed. Please try again.");
+        }
+        
+        setStakeError(null);
+      }
+      
+      // Stake the tokens
+      setStakeError("Staking tokens...");
+      const stakeTx = prepareContractCall({
+        contract,
+        method: "function stakeTokens(uint256)",
+        params: [tokenAmount],
+        gas: 300000n,
+      });
+      
+      await sendTransaction(stakeTx);
+      
+      // Wait for transaction to process
+      setStakeError("Waiting for transaction confirmation...");
+      await new Promise(resolve => setTimeout(resolve, 15000));
+      
+      // Get updated staked tokens
+      const userStaked = await readContract({
+        contract,
+        method: "function getStakedTokens(address) view returns (uint256)",
+        params: [activeAccount.address]
+      });
+      
+      const userStakedInEther = (Number(userStaked) / 1e18).toFixed(2);
+      setUserStakedTokens(userStakedInEther);
+      
+      // Get updated total staked tokens
+      const totalStaked = await readContract({
+        contract,
+        method: "function totalStakedTokens() view returns (uint256)",
+        params: []
+      });
+      
+      const totalStakedInEther = (Number(totalStaked) / 1e18).toFixed(2);
+      setTotalStakedTokens(totalStakedInEther);
+      
+      setStakeSuccess(true);
+      setStakeAmount("");
+      setStakeError(null);
+      setTimeout(() => setShowStakeForm(false), 3000);
+    } catch (error) {
+      console.error("Error staking tokens:", error);
+      setStakeError(error instanceof Error ? error.message : "Failed to stake tokens");
+    } finally {
+      setIsStaking(false);
+    }
+  };
+  
+  // Add function to handle unstaking tokens
+  const handleUnstakeTokens = async () => {
+    if (!activeAccount || !community || !isUserMember) return;
+    
+    try {
+      setIsUnstaking(true);
+      setStakeError(null);
+      setStakeSuccess(false);
+      
+      // Get the membership contract
+      const contract = getContract({
+        client,
+        address: community.nftContractAddress,
+        chain: baseSepolia,
+      });
+      
+      // Convert the unstake amount to token units with 18 decimals
+      const amount = parseFloat(unstakeAmount);
+      if (isNaN(amount) || amount <= 0) {
+        throw new Error("Please enter a valid amount to unstake");
+      }
+      
+      const tokenAmount = BigInt(Math.floor(amount * 1e18));
+      console.log("Unstaking tokens amount:", tokenAmount.toString());
+      
+      // Check if user has enough staked tokens
+      const userStaked = await readContract({
+        contract,
+        method: "function getStakedTokens(address) view returns (uint256)",
+        params: [activeAccount.address]
+      });
+      
+      if (userStaked < tokenAmount) {
+        throw new Error(`Insufficient staked tokens. You only have ${Number(userStaked) / 1e18} $GROW staked.`);
+      }
+      
+      // Get membership price to check minimum stake requirement
+      const membershipPrice = await readContract({
+        contract,
+        method: "function membershipPrice() view returns (uint256)",
+        params: []
+      });
+      
+      if (userStaked - tokenAmount < membershipPrice) {
+        throw new Error(`You must maintain at least ${Number(membershipPrice) / 1e18} $GROW staked for your membership.`);
+      }
+      
+      // Unstake the tokens
+      setStakeError("Unstaking tokens...");
+      const unstakeTx = prepareContractCall({
+        contract,
+        method: "function unstakeTokens(uint256)",
+        params: [tokenAmount],
+        gas: 300000n,
+      });
+      
+      await sendTransaction(unstakeTx);
+      
+      // Wait for transaction to process
+      setStakeError("Waiting for transaction confirmation...");
+      await new Promise(resolve => setTimeout(resolve, 15000));
+      
+      // Get updated staked tokens
+      const newUserStaked = await readContract({
+        contract,
+        method: "function getStakedTokens(address) view returns (uint256)",
+        params: [activeAccount.address]
+      });
+      
+      const userStakedInEther = (Number(newUserStaked) / 1e18).toFixed(2);
+      setUserStakedTokens(userStakedInEther);
+      
+      // Get updated total staked tokens
+      const totalStaked = await readContract({
+        contract,
+        method: "function totalStakedTokens() view returns (uint256)",
+        params: []
+      });
+      
+      const totalStakedInEther = (Number(totalStaked) / 1e18).toFixed(2);
+      setTotalStakedTokens(totalStakedInEther);
+      
+      setStakeSuccess(true);
+      setUnstakeAmount("");
+      setStakeError(null);
+      setTimeout(() => setShowStakeForm(false), 3000);
+    } catch (error) {
+      console.error("Error unstaking tokens:", error);
+      setStakeError(error instanceof Error ? error.message : "Failed to unstake tokens");
+    } finally {
+      setIsUnstaking(false);
+    }
+  };
+  
   if (loading) {
     return (
       <main className="min-h-screen bg-white text-zinc-900">
@@ -876,6 +1146,10 @@ export default function CommunityDetail() {
                 <div className="flex justify-between">
                   <span className="text-zinc-500">Membership Limit:</span>
                   <span>{memberCount !== null ? `${memberCount} / ` : ''}{community.membershipLimit} members</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">Total Staked:</span>
+                  <span className="font-medium">{totalStakedTokens ?? '...'} $GROW</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-zinc-500">Contract Address:</span>
@@ -1008,6 +1282,15 @@ export default function CommunityDetail() {
                     <div className="mb-4 bg-green-50 text-green-600 p-4 rounded-lg text-sm">
                       <p>You are already a member of this community!</p>
                       
+                      {userStakedTokens && (
+                        <div className="mt-2 border-t border-green-100 pt-2">
+                          <p className="flex justify-between font-medium mt-1">
+                            <span>Your Staked Tokens:</span>
+                            <span>{userStakedTokens} $GROW</span>
+                          </p>
+                        </div>
+                      )}
+                      
                       {membershipTokenId && (
                         <div className="mt-2 border-t border-green-100 pt-2">
                           <div className="flex items-center gap-2 mt-1">
@@ -1030,6 +1313,104 @@ export default function CommunityDetail() {
                             Enter Community Room
                           </button>
                         </Link>
+                      </div>
+                      
+                      {/* Stake/Unstake UI */}
+                      <div className="mt-3">
+                        {!showStakeForm ? (
+                          <button 
+                            onClick={() => setShowStakeForm(true)}
+                            className="w-full py-2 rounded-lg text-zinc-800 border border-zinc-300 hover:bg-zinc-50 transition-colors mt-2"
+                          >
+                            Stake/Unstake Tokens
+                          </button>
+                        ) : (
+                          <div className="mt-3 bg-white p-3 rounded-lg border border-zinc-200">
+                            <h4 className="font-medium mb-2">Manage Your Staked Tokens</h4>
+                            
+                            {/* Stake Form */}
+                            <div className="mb-3">
+                              <label className="block text-xs text-zinc-500 mb-1">Stake additional tokens:</label>
+                              <div className="flex gap-2">
+                                <input
+                                  type="number"
+                                  value={stakeAmount}
+                                  onChange={(e) => setStakeAmount(e.target.value)}
+                                  placeholder="Amount to stake"
+                                  className="flex-1 p-2 text-sm border border-zinc-300 rounded"
+                                  min="0"
+                                  step="0.01"
+                                />
+                                <button
+                                  onClick={handleStakeTokens}
+                                  disabled={isStaking || !stakeAmount}
+                                  className={`px-3 py-1 rounded text-white text-sm ${
+                                    isStaking || !stakeAmount
+                                      ? 'bg-zinc-300 cursor-not-allowed'
+                                      : 'bg-green-600 hover:bg-green-700'
+                                  }`}
+                                >
+                                  {isStaking ? 'Staking...' : 'Stake'}
+                                </button>
+                              </div>
+                            </div>
+                            
+                            {/* Unstake Form */}
+                            <div>
+                              <label className="block text-xs text-zinc-500 mb-1">Unstake tokens:</label>
+                              <div className="flex gap-2">
+                                <input
+                                  type="number"
+                                  value={unstakeAmount}
+                                  onChange={(e) => setUnstakeAmount(e.target.value)}
+                                  placeholder="Amount to unstake"
+                                  className="flex-1 p-2 text-sm border border-zinc-300 rounded"
+                                  min="0"
+                                  step="0.01"
+                                />
+                                <button
+                                  onClick={handleUnstakeTokens}
+                                  disabled={isUnstaking || !unstakeAmount}
+                                  className={`px-3 py-1 rounded text-white text-sm ${
+                                    isUnstaking || !unstakeAmount
+                                      ? 'bg-zinc-300 cursor-not-allowed'
+                                      : 'bg-red-600 hover:bg-red-700'
+                                  }`}
+                                >
+                                  {isUnstaking ? 'Unstaking...' : 'Unstake'}
+                                </button>
+                              </div>
+                              <p className="text-xs text-zinc-500 mt-1">
+                                Note: You must maintain at least the membership price ({community.nftPrice} $GROW) staked.
+                              </p>
+                            </div>
+                            
+                            {stakeError && (
+                              <div className="mt-2 bg-red-50 text-red-600 p-2 rounded text-xs">
+                                {stakeError}
+                              </div>
+                            )}
+                            
+                            {stakeSuccess && (
+                              <div className="mt-2 bg-green-50 text-green-600 p-2 rounded text-xs">
+                                Transaction successful!
+                              </div>
+                            )}
+                            
+                            <button
+                              onClick={() => {
+                                setShowStakeForm(false);
+                                setStakeAmount("");
+                                setUnstakeAmount("");
+                                setStakeError(null);
+                                setStakeSuccess(false);
+                              }}
+                              className="w-full mt-3 py-1 text-xs text-zinc-500 hover:text-zinc-700"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1075,7 +1456,7 @@ export default function CommunityDetail() {
                           }`}
                         >
                           {purchaseStatus === 'loading' 
-                            ? 'Processing...' 
+                            ? 'Processing... Please check your wallet for approval' 
                             : `Purchase Membership for ${community.nftPrice} $GROW`}
                         </button>
                         
