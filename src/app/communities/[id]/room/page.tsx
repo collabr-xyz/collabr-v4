@@ -1570,13 +1570,13 @@ export default function ChatRoom() {
                 )}
                 
                 {/* Add Manage Stake link */}
-                {activeAccount?.address && userStatus === 'member' && stakingSupported && (
+                {/* {activeAccount?.address && userStatus === 'member' && stakingSupported && (
                   <div className="mt-3 pt-2 border-t border-gray-100">
                     <Link href={`/communities/${communityId}`} className="text-xs text-[#008CFF] hover:underline">
                       Manage your stake →
                     </Link>
                   </div>
-                )}
+                )} */}
               </>
             )}
           </div>

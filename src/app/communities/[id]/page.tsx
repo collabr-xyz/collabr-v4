@@ -1316,7 +1316,7 @@ export default function CommunityDetail() {
                       </div>
                       
                       {/* Stake/Unstake UI */}
-                      <div className="mt-3">
+                      {/* <div className="mt-3">
                         {!showStakeForm ? (
                           <button 
                             onClick={() => setShowStakeForm(true)}
@@ -1328,7 +1328,6 @@ export default function CommunityDetail() {
                           <div className="mt-3 bg-white p-3 rounded-lg border border-zinc-200">
                             <h4 className="font-medium mb-2">Manage Your Staked Tokens</h4>
                             
-                            {/* Stake Form */}
                             <div className="mb-3">
                               <label className="block text-xs text-zinc-500 mb-1">Stake additional tokens:</label>
                               <div className="flex gap-2">
@@ -1355,7 +1354,6 @@ export default function CommunityDetail() {
                               </div>
                             </div>
                             
-                            {/* Unstake Form */}
                             <div>
                               <label className="block text-xs text-zinc-500 mb-1">Unstake tokens:</label>
                               <div className="flex gap-2">
@@ -1411,7 +1409,7 @@ export default function CommunityDetail() {
                             </button>
                           </div>
                         )}
-                      </div>
+                      </div> */}
                     </div>
                   </div>
                 ) : (
