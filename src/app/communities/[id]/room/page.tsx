@@ -55,6 +55,7 @@ interface Member {
   displayName?: string;
   avatarUrl?: string;
   joinedAt: string;
+  contributions?: number; // Add contributions field
 }
 
 interface MerchandiseItem {
@@ -114,6 +115,11 @@ export default function ChatRoom() {
   const [userStakedTokens, setUserStakedTokens] = useState<string | null>(null);
   const [fetchingTokens, setFetchingTokens] = useState(false);
   const [stakingSupported, setStakingSupported] = useState<boolean | null>(null);
+  const [showLeaderboard, setShowLeaderboard] = useState(true); // Toggle between members list and leaderboard
+  const [contributions, setContributions] = useState<{[key: string]: number}>({});
+  const [isUpvoting, setIsUpvoting] = useState(false);
+  const [upvoteError, setUpvoteError] = useState<string | null>(null);
+  const [upvotedToday, setUpvotedToday] = useState<{[key: string]: boolean}>({});
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
@@ -1414,6 +1420,140 @@ export default function ChatRoom() {
     return () => clearTimeout(timerId);
   }, [activeAccount?.address, communityId, userStatus, profileChecked]);
   
+  // Function to check if user has already upvoted a member today
+  const checkUpvotedToday = useCallback(async () => {
+    if (!activeAccount?.address || !communityId) return;
+    
+    try {
+      const upvotesRef = collection(db, "communities", communityId, "upvotes");
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const q = query(
+        upvotesRef,
+        where("voterAddress", "==", activeAccount.address.toLowerCase()),
+        where("timestamp", ">=", Timestamp.fromDate(today))
+      );
+      
+      const querySnapshot = await getDocs(q);
+      const upvoted: {[key: string]: boolean} = {};
+      
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        upvoted[data.receiverAddress] = true;
+      });
+      
+      setUpvotedToday(upvoted);
+    } catch (err) {
+      console.error("Error checking upvoted status:", err);
+    }
+  }, [activeAccount?.address, communityId]);
+  
+  // Load contributions for members
+  useEffect(() => {
+    async function fetchContributions() {
+      if (!communityId) return;
+      
+      try {
+        const contributionsRef = collection(db, "communities", communityId, "contributions");
+        const querySnapshot = await getDocs(contributionsRef);
+        
+        const contributionsData: {[key: string]: number} = {};
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          contributionsData[data.memberAddress] = data.count || 0;
+        });
+        
+        setContributions(contributionsData);
+      } catch (err) {
+        console.error("Error fetching contributions:", err);
+      }
+    }
+    
+    fetchContributions();
+  }, [communityId]);
+  
+  // Check upvoted status when account changes
+  useEffect(() => {
+    if (activeAccount?.address) {
+      checkUpvotedToday();
+    }
+  }, [activeAccount?.address, checkUpvotedToday]);
+  
+  // Handle upvoting a member
+  const handleUpvote = async (member: Member) => {
+    if (!activeAccount?.address || !communityId) {
+      setUpvoteError("Please connect your wallet to upvote");
+      return;
+    }
+    
+    if (member.walletAddress.toLowerCase() === activeAccount.address.toLowerCase()) {
+      setUpvoteError("You cannot upvote yourself");
+      return;
+    }
+    
+    if (upvotedToday[member.walletAddress.toLowerCase()]) {
+      setUpvoteError("You've already upvoted someone today");
+      return;
+    }
+    
+    setIsUpvoting(true);
+    setUpvoteError(null);
+    
+    try {
+      // Add upvote record
+      const upvotesRef = collection(db, "communities", communityId, "upvotes");
+      await addDoc(upvotesRef, {
+        communityId,
+        voterAddress: activeAccount.address.toLowerCase(),
+        receiverAddress: member.walletAddress.toLowerCase(),
+        timestamp: Timestamp.now(),
+      });
+      
+      // Update contribution count
+      const contributionRef = doc(db, "communities", communityId, "contributions", member.walletAddress.toLowerCase());
+      const contributionDoc = await getDoc(contributionRef);
+      
+      if (contributionDoc.exists()) {
+        await setDoc(contributionRef, {
+          memberAddress: member.walletAddress.toLowerCase(),
+          count: (contributionDoc.data().count || 0) + 1,
+          lastUpdated: Timestamp.now()
+        });
+      } else {
+        await setDoc(contributionRef, {
+          memberAddress: member.walletAddress.toLowerCase(),
+          count: 1,
+          lastUpdated: Timestamp.now()
+        });
+      }
+      
+      // Update local state
+      setContributions(prev => ({
+        ...prev,
+        [member.walletAddress.toLowerCase()]: (prev[member.walletAddress.toLowerCase()] || 0) + 1
+      }));
+      
+      setUpvotedToday(prev => ({
+        ...prev,
+        [member.walletAddress.toLowerCase()]: true
+      }));
+      
+    } catch (err) {
+      console.error("Error upvoting member:", err);
+      setUpvoteError("Failed to upvote. Please try again.");
+    } finally {
+      setIsUpvoting(false);
+    }
+  };
+  
+  // Get members sorted by contributions for leaderboard
+  const leaderboardMembers = [...members].sort((a, b) => {
+    const aContributions = contributions[a.walletAddress.toLowerCase()] || 0;
+    const bContributions = contributions[b.walletAddress.toLowerCase()] || 0;
+    return bContributions - aContributions;
+  });
+  
   if (error) {
     return (
       <main className="min-h-screen bg-white text-zinc-900">
@@ -1570,13 +1710,13 @@ export default function ChatRoom() {
                 )}
                 
                 {/* Add Manage Stake link */}
-                {activeAccount?.address && userStatus === 'member' && stakingSupported && (
+                {/* {activeAccount?.address && userStatus === 'member' && stakingSupported && (
                   <div className="mt-3 pt-2 border-t border-gray-100">
                     <Link href={`/communities/${communityId}`} className="text-xs text-[#008CFF] hover:underline">
                       Manage your stake →
                     </Link>
                   </div>
-                )}
+                )} */}
               </>
             )}
           </div>
@@ -1883,33 +2023,34 @@ export default function ChatRoom() {
       {/* Member list sidebar - Right */}
       <div className="w-64 bg-gray-50 p-4 border-l border-gray-200">
         <div className="flex items-center justify-between mb-4">
-          <div className="text-xs uppercase text-zinc-500 font-medium">
-            Members — {members.length}
+          <div className="flex space-x-2">
+            <button 
+              onClick={() => setShowLeaderboard(false)}
+              className={`text-xs px-3 py-1 rounded-full ${!showLeaderboard ? 'bg-[#008CFF] text-white' : 'bg-gray-100 text-zinc-600 hover:bg-gray-200'}`}
+            >
+              Members
+            </button>
+            <button 
+              onClick={() => setShowLeaderboard(true)}
+              className={`text-xs px-3 py-1 rounded-full ${showLeaderboard ? 'bg-[#008CFF] text-white' : 'bg-gray-100 text-zinc-600 hover:bg-gray-200'}`}
+            >
+              Leaderboard
+            </button>
           </div>
+          
           <div className="flex space-x-2">
             <button 
               onClick={() => refreshMembers()}
-              className="text-xs text-zinc-500 hover:text-[#008CFF] flex items-center"
+              className="text-xs text-zinc-500 hover:text-[#008CFF]"
               title="Refresh member list"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" viewBox="0 0 20 20" fill="currentColor">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
               </svg>
-              <span>List</span>
-            </button>
-            <button 
-              onClick={() => forceRefreshAvatars()}
-              className="text-xs text-zinc-500 hover:text-[#008CFF] flex items-center"
-              title="Refresh avatars"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.5-9c0-.276-.224-.5-.5-.5s-.5.224-.5.5h1zm0 3.5c0 .276-.224.5-.5.5s-.5-.224-.5-.5h1zm-1-7c0-.276.224-.5.5-.5s.5.224.5.5h-1zm1.5.5A.5.5 0 0010 6a.5.5 0 00-.5.5h1zm-2 0a.5.5 0 00.5-.5.5.5 0 00-.5-.5v1zm3 0a.5.5 0 00-.5-.5.5.5 0 00-.5.5h1zm-2.5-2a.5.5 0 00-.5.5.5.5 0 00.5.5V4zM7 8a.5.5 0 00.5.5.5.5 0 00.5-.5H7zm0 0a.5.5 0 00.5-.5.5.5 0 00-.5-.5v1zm3 0a.5.5 0 00-.5-.5.5.5 0 00-.5.5h1zm-5.5-3a.5.5 0 01.5-.5h3a.5.5 0 010 1H5a.5.5 0 01-.5-.5zm5.5 0a.5.5 0 01.5-.5h3a.5.5 0 010 1h-3a.5.5 0 01-.5-.5z" />
-              </svg>
-              <span>Avatars</span>
             </button>
           </div>
         </div>
-
+        
         {/* Current user profile card */}
         {(activeAccount?.address && (userStatus === 'member' || wasEverMember)) && (
           <div className="bg-white rounded-md p-3 mb-4 border border-gray-200">
@@ -1999,89 +2140,229 @@ export default function ChatRoom() {
           </div>
         )}
         
-        <div className="text-xs uppercase text-zinc-500 font-medium mb-2">
-          Community Members
-        </div>
-        <div className="space-y-2 max-h-[calc(100vh-220px)] overflow-y-auto pr-1">{/* Adjust height to account for profile card */}
-          {members.length === 0 ? (
-            <div className="text-sm text-zinc-500 text-center py-4">
-              No members found
+        {upvoteError && (
+          <div className="bg-red-50 text-red-700 p-2 rounded-md mb-2 text-xs">
+            {upvoteError}
+          </div>
+        )}
+        
+        {showLeaderboard ? (
+          // Leaderboard Display
+          <>
+            <div className="text-xs uppercase text-zinc-500 font-medium mb-2 flex justify-between items-center">
+              <span>Community Leaderboard</span>
+              <span className="text-[9px] text-zinc-400">Ranked by contribution</span>
             </div>
-          ) : (
-            members.map((member) => {
-              const isCreator = community?.creatorAddress?.toLowerCase() === member.walletAddress.toLowerCase();
-              return (
-                <div key={member.id} className="flex items-center bg-white hover:bg-gray-100 rounded-md p-2 transition-colors">
-                  <div className="w-8 h-8 rounded-full bg-gray-100 flex-shrink-0 overflow-hidden mr-2">
-                    {member.avatarUrl ? (
-                      <Image 
-                        src={member.avatarUrl} 
-                        alt="Avatar" 
-                        width={32}
-                        height={32}
-                        className="w-full h-full object-cover" 
-                        onLoadingComplete={() => {}}
-                        onError={(e) => {
-                          console.error(`Failed to load avatar image for ${member.walletAddress}:`, member.avatarUrl);
-                          // Update with fallback avatar URL
-                          const fallbackUrl = `https://api.dicebear.com/7.x/identicon/svg?seed=${member.walletAddress}`;
-                          setMembers(prev => prev.map(m => 
-                            m.id === member.id 
-                              ? {...m, avatarUrl: fallbackUrl} 
-                              : m
-                          ));
-                        }}
-                      />
-                    ) : (
-                      <div className={`w-full h-full flex items-center justify-center ${isCreator ? 'bg-[#008CFF]' : 'bg-gray-200'} ${isCreator ? 'text-white' : 'text-zinc-600'}`}>
-                        <Image 
-                          src={`https://api.dicebear.com/7.x/identicon/svg?seed=${member.walletAddress}`}
-                          alt="Default Avatar" 
-                          width={32}
-                          height={32}
-                          className="w-full h-full object-cover"
-                          onError={(e) => {
-                            // Display initials as fallback
-                            const firstChar = member.displayName?.[0] || member.walletAddress[0] || '?';
-                            const div = document.createElement('div');
-                            div.textContent = firstChar;
-                            div.className = 'flex items-center justify-center w-full h-full';
-                            
-                            // Find the parent container and replace the image with the text div
-                            const parent = e.currentTarget.parentElement;
-                            if (parent) {
-                              parent.innerHTML = '';
-                              parent.appendChild(div);
-                            }
-                          }}
-                        />
+            <div className="space-y-2 max-h-[calc(100vh-220px)] overflow-y-auto pr-1">
+              {leaderboardMembers.length === 0 ? (
+                <div className="text-sm text-zinc-500 text-center py-4">
+                  No members found
+                </div>
+              ) : (
+                leaderboardMembers.map((member, index) => {
+                  const isCreator = community?.creatorAddress?.toLowerCase() === member.walletAddress.toLowerCase();
+                  const memberContributions = contributions[member.walletAddress.toLowerCase()] || 0;
+                  const isCurrentUser = activeAccount?.address?.toLowerCase() === member.walletAddress.toLowerCase();
+                  const hasUpvotedToday = Object.keys(upvotedToday).length > 0;
+                  
+                  return (
+                    <div key={member.id} className={`flex items-center bg-white ${index < 3 ? 'bg-gradient-to-r from-white to-blue-50' : 'hover:bg-gray-100'} rounded-md p-2 transition-colors relative`}>
+                      {/* Rank indicator */}
+                      <div className={`absolute -left-1 -top-1 ${
+                        index === 0 ? 'bg-yellow-400' : 
+                        index === 1 ? 'bg-gray-300' : 
+                        index === 2 ? 'bg-amber-600' : 'bg-gray-200'
+                      } rounded-full w-5 h-5 flex items-center justify-center text-xs ${index < 3 ? 'text-white' : 'text-zinc-600'} font-bold`}>
+                        {index + 1}
                       </div>
-                    )}
-                  </div>
-                  <div className="flex flex-col overflow-hidden">
-                    <div className="flex items-center">
-                      <div className="text-sm font-medium truncate">
-                        {member.displayName ? (
-                          // Show profile name with a special style
-                          <span className="text-[#008CFF]">{member.displayName}</span>
+                      
+                      <div className="w-8 h-8 rounded-full bg-gray-100 flex-shrink-0 overflow-hidden ml-2 mr-2">
+                        {/* Existing avatar code */}
+                        {member.avatarUrl ? (
+                          <Image 
+                            src={member.avatarUrl} 
+                            alt="Avatar" 
+                            width={32}
+                            height={32}
+                            className="w-full h-full object-cover" 
+                            onLoadingComplete={() => {}}
+                            onError={(e) => {
+                              console.error(`Failed to load avatar image for ${member.walletAddress}:`, member.avatarUrl);
+                              // Update with fallback avatar URL
+                              const fallbackUrl = `https://api.dicebear.com/7.x/identicon/svg?seed=${member.walletAddress}`;
+                              setMembers(prev => prev.map(m => 
+                                m.id === member.id 
+                                  ? {...m, avatarUrl: fallbackUrl} 
+                                  : m
+                              ));
+                            }}
+                          />
                         ) : (
-                          // Default to wallet address if no profile name
-                          member.walletAddress.substring(0, 6) + '...'
+                          <div className={`w-full h-full flex items-center justify-center ${isCreator ? 'bg-[#008CFF]' : 'bg-gray-200'} ${isCreator ? 'text-white' : 'text-zinc-600'}`}>
+                            <Image 
+                              src={`https://api.dicebear.com/7.x/identicon/svg?seed=${member.walletAddress}`}
+                              alt="Default Avatar" 
+                              width={32}
+                              height={32}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                // Display initials as fallback
+                                const firstChar = member.displayName?.[0] || member.walletAddress[0] || '?';
+                                const div = document.createElement('div');
+                                div.textContent = firstChar;
+                                div.className = 'flex items-center justify-center w-full h-full';
+                                
+                                // Find the parent container and replace the image with the text div
+                                const parent = e.currentTarget.parentElement;
+                                if (parent) {
+                                  parent.innerHTML = '';
+                                  parent.appendChild(div);
+                                }
+                              }}
+                            />
+                          </div>
                         )}
                       </div>
-                      {isCreator && (
-                        <span className="ml-2 text-xs bg-blue-50 text-[#008CFF] px-1.5 py-0.5 rounded">Host</span>
-                      )}
+                      
+                      <div className="flex-1">
+                        <div className="flex items-center">
+                          <div className="text-sm font-medium truncate">
+                            {member.displayName ? (
+                              <span className={`${index === 0 ? 'text-yellow-600' : index === 1 ? 'text-zinc-700' : index === 2 ? 'text-amber-700' : 'text-[#008CFF]'}`}>
+                                {member.displayName}
+                              </span>
+                            ) : (
+                              member.walletAddress.substring(0, 6) + '...'
+                            )}
+                          </div>
+                          {isCreator && (
+                            <span className="ml-2 text-xs bg-blue-50 text-[#008CFF] px-1.5 py-0.5 rounded">Host</span>
+                          )}
+                        </div>
+                        <div className="flex justify-between items-center mt-1">
+                          <div className="text-xs text-zinc-500">
+                            {memberContributions} {memberContributions === 1 ? 'contribution' : 'contributions'}
+                          </div>
+                          {!isCurrentUser && userStatus === 'member' && (
+                            <button
+                              onClick={() => handleUpvote(member)}
+                              disabled={isUpvoting || hasUpvotedToday || isCurrentUser}
+                              className={`text-xs px-2 py-0.5 rounded ${
+                                upvotedToday[member.walletAddress.toLowerCase()] ? 
+                                'bg-green-100 text-green-600' : 
+                                hasUpvotedToday ?
+                                'bg-gray-100 text-zinc-400 cursor-not-allowed' :
+                                'bg-blue-50 text-[#008CFF] hover:bg-blue-100'
+                              }`}
+                              title={
+                                upvotedToday[member.walletAddress.toLowerCase()] ? 
+                                "You've upvoted this member today" : 
+                                hasUpvotedToday ? 
+                                "You can only upvote once per day" : 
+                                "Upvote this member's contributions"
+                              }
+                            >
+                              {upvotedToday[member.walletAddress.toLowerCase()] ? 
+                                'Upvoted' : 
+                                isUpvoting ? 'Upvoting...' : 'Upvote'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-xs text-zinc-500 truncate">
-                      Joined: {new Date(member.joinedAt).toLocaleDateString()}
-                    </div>
-                  </div>
+                  );
+                })
+              )}
+            </div>
+          </>
+        ) : (
+          // Original Members List
+          <>
+            <div className="text-xs uppercase text-zinc-500 font-medium mb-2">
+              Community Members
+            </div>
+            <div className="space-y-2 max-h-[calc(100vh-220px)] overflow-y-auto pr-1">
+              {members.length === 0 ? (
+                <div className="text-sm text-zinc-500 text-center py-4">
+                  No members found
                 </div>
-              );
-            })
-          )}
-        </div>
+              ) : (
+                members.map((member) => {
+                  const isCreator = community?.creatorAddress?.toLowerCase() === member.walletAddress.toLowerCase();
+                  return (
+                    <div key={member.id} className="flex items-center bg-white hover:bg-gray-100 rounded-md p-2 transition-colors">
+                      <div className="w-8 h-8 rounded-full bg-gray-100 flex-shrink-0 overflow-hidden mr-2">
+                        {member.avatarUrl ? (
+                          <Image 
+                            src={member.avatarUrl} 
+                            alt="Avatar" 
+                            width={32}
+                            height={32}
+                            className="w-full h-full object-cover" 
+                            onLoadingComplete={() => {}}
+                            onError={(e) => {
+                              console.error(`Failed to load avatar image for ${member.walletAddress}:`, member.avatarUrl);
+                              // Update with fallback avatar URL
+                              const fallbackUrl = `https://api.dicebear.com/7.x/identicon/svg?seed=${member.walletAddress}`;
+                              setMembers(prev => prev.map(m => 
+                                m.id === member.id 
+                                  ? {...m, avatarUrl: fallbackUrl} 
+                                  : m
+                              ));
+                            }}
+                          />
+                        ) : (
+                          <div className={`w-full h-full flex items-center justify-center ${isCreator ? 'bg-[#008CFF]' : 'bg-gray-200'} ${isCreator ? 'text-white' : 'text-zinc-600'}`}>
+                            <Image 
+                              src={`https://api.dicebear.com/7.x/identicon/svg?seed=${member.walletAddress}`}
+                              alt="Default Avatar" 
+                              width={32}
+                              height={32}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                // Display initials as fallback
+                                const firstChar = member.displayName?.[0] || member.walletAddress[0] || '?';
+                                const div = document.createElement('div');
+                                div.textContent = firstChar;
+                                div.className = 'flex items-center justify-center w-full h-full';
+                                
+                                // Find the parent container and replace the image with the text div
+                                const parent = e.currentTarget.parentElement;
+                                if (parent) {
+                                  parent.innerHTML = '';
+                                  parent.appendChild(div);
+                                }
+                              }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex flex-col overflow-hidden">
+                        <div className="flex items-center">
+                          <div className="text-sm font-medium truncate">
+                            {member.displayName ? (
+                              // Show profile name with a special style
+                              <span className="text-[#008CFF]">{member.displayName}</span>
+                            ) : (
+                              // Default to wallet address if no profile name
+                              member.walletAddress.substring(0, 6) + '...'
+                            )}
+                          </div>
+                          {isCreator && (
+                            <span className="ml-2 text-xs bg-blue-50 text-[#008CFF] px-1.5 py-0.5 rounded">Host</span>
+                          )}
+                        </div>
+                        <div className="text-xs text-zinc-500 truncate">
+                          Joined: {new Date(member.joinedAt).toLocaleDateString()}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Profile completion modal - outside the flex layout */}
