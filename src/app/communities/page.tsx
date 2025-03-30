@@ -113,6 +113,40 @@ export default function Communities() {
               // Check if current user has membership
               let userHasMembership = false;
               
+              // When counting members, ensure creator is included
+              // Start with the total members from contract
+              let memberCount = Number(totalMembers);
+              
+              // Check if creator is already included in the count
+              try {
+                const creatorHasMembership = await readContract({
+                  contract,
+                  method: "function hasMembership(address) view returns (bool)",
+                  params: [community.creatorAddress]
+                }).catch(() => 
+                  readContract({
+                    contract,
+                    method: "function isMember(address) view returns (bool)",
+                    params: [community.creatorAddress]
+                  })
+                ).catch(() => 
+                  readContract({
+                    contract,
+                    method: "function balanceOf(address) view returns (uint256)",
+                    params: [community.creatorAddress]
+                  }).then(balance => Number(balance) > 0)
+                );
+                
+                // If creator doesn't have membership through normal channels, add them manually
+                if (!creatorHasMembership) {
+                  memberCount += 1;
+                }
+              } catch (error) {
+                console.error(`Error checking creator membership for ${community.id}:`, error);
+                // If we can't verify, add 1 to ensure creator is counted
+                memberCount += 1;
+              }
+              
               if (activeAccount) {
                 try {
                   // First try with hasMembership function
@@ -160,7 +194,7 @@ export default function Communities() {
               
               return {
                 ...community,
-                memberCount: Number(totalMembers),
+                memberCount: memberCount,
                 userHasMembership
               };
             } catch (error) {

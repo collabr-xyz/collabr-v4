@@ -1803,9 +1803,51 @@ export default function ChatRoom() {
       <div className="flex-1 flex flex-col">
         <div className="p-4 border-b border-gray-200 flex items-center justify-between">
           <div className="flex items-center">
-            <div className="font-medium">Chat Room</div>
-            <div className="ml-2 text-sm text-zinc-500">
-              {members.length} member{members.length !== 1 ? 's' : ''}
+            {/* Add community image */}
+            <Link 
+              href={`/communities/${communityId}`} 
+              className="w-8 h-8 rounded-full overflow-hidden mr-3 border border-gray-200 bg-gray-50 hover:border-[#008CFF] hover:shadow-sm transition-all"
+            >
+              {community?.image ? (
+                <Image 
+                  src={community.image} 
+                  alt={community.name || "Community"} 
+                  width={32}
+                  height={32}
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    // Fallback for failed community image
+                    const fallbackUrl = `https://api.dicebear.com/7.x/shapes/svg?seed=${communityId}`;
+                    e.currentTarget.src = fallbackUrl;
+                  }}
+                />
+              ) : (
+                <Image 
+                  src={`https://api.dicebear.com/7.x/shapes/svg?seed=${communityId}`}
+                  alt={community?.name || "Community"} 
+                  width={32}
+                  height={32}
+                  className="w-full h-full object-cover"
+                />
+              )}
+            </Link>
+            <div>
+              <div className="font-medium">
+                <Link href={`/communities/${communityId}`} className="hover:text-[#008CFF] transition-colors">
+                  {community?.name || "Chat Room"}
+                </Link>
+              </div>
+              <div className="text-sm text-zinc-500">
+                {members.length} member{members.length !== 1 ? 's' : ''}
+                {community?.description && (
+                  <span 
+                    className="ml-2 text-zinc-400" 
+                    title={community.description.length > 40 ? community.description : ''}
+                  >
+                    • {community.description.length > 40 ? `${community.description.substring(0, 40)}...` : community.description}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
           <div className="flex items-center">

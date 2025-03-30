@@ -24,6 +24,27 @@ export default function Home() {
     }));
   };
 
+  const sendNotificationEmail = async (data: { email: string; platform: string; socialHandle: string }) => {
+    try {
+      const response = await fetch('/api/send-notification', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to send notification');
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Failed to send notification:', error);
+      return false;
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
@@ -33,6 +54,10 @@ export default function Home() {
       // Here you would typically send the form data to your backend
       // For now, we'll just simulate a successful submission
       await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Send notification email
+      await sendNotificationEmail(formData);
+      
       setIsSubmitted(true);
       setFormData({
         email: "",
@@ -131,13 +156,11 @@ export default function Home() {
                     className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#008CFF] focus:border-[#008CFF] outline-none transition bg-white"
                   >
                     <option value="" disabled>Select a platform</option>
-                    <option value="X (Twitter)">Twitter</option>
-                    <option value="Discord">Discord</option>
-                    <option value="Warpcast">Discord</option>
+                    <option value="X (Twitter)">X (Twitter)</option>
+                    <option value="Discord">Twitch</option>
+                    <option value="Discord">Youtube</option>
                     <option value="Instagram">Instagram</option>
-                    <option value="Youtube">Instagram</option>
-                    <option value="Twitch">Instagram</option>
-                    <option value="Rodeo">Instagram</option>
+                    <option value="Youtube">Farcaster</option>
                     <option value="Other">Other</option>
                   </select>
                 </div>
@@ -208,14 +231,8 @@ export default function Home() {
                 </div>
                 <h4 className="text-2xl font-bold mb-3">Application Received!</h4>
                 <p className="text-zinc-600 mb-6 max-w-md mx-auto">
-                  Thank you for your interest in becoming a Collabr host. We'll review your application and get back to you within 2-3 business days.
+                  Thank you for your interest in becoming a Collabr host. Our team will reach out to you within 24 hours.
                 </p>
-                <button 
-                  onClick={() => setIsSubmitted(false)}
-                  className="text-[#008CFF] hover:text-[#0070CC] font-medium underline"
-                >
-                  Submit another application
-                </button>
               </div>
             )}
           </div>
