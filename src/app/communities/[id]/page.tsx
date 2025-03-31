@@ -1279,162 +1279,148 @@ export default function CommunityDetail() {
                   </div>
                 ) : isUserMember ? (
                   <div>
-                    <div className="mb-4 bg-green-50 text-green-600 p-4 rounded-lg text-sm">
-                      <p>You are already a member of this community!</p>
+                    <div className="mb-4 bg-green-50 text-green-600 p-4 rounded-lg">
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="font-medium">Active Membership</h3>
+                        <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">Member</span>
+                      </div>
                       
-                      {userStakedTokens && (
-                        <div className="mt-2 border-t border-green-100 pt-2">
-                          <p className="flex justify-between font-medium mt-1">
-                            <span>Your Staked Tokens:</span>
-                            <span>{userStakedTokens} $GROW</span>
-                          </p>
+                      <p className="text-sm mb-3">You are a member of this community!</p>
+                      
+                      <div className="mt-2 border-t border-green-100 pt-2 text-sm space-y-2">
+                        <div className="flex justify-between">
+                          <span className="text-green-700">Membership Fee:</span>
+                          <span>{community.nftPrice} $GROW</span>
                         </div>
-                      )}
-                      
-                      {membershipTokenId && (
-                        <div className="mt-2 border-t border-green-100 pt-2">
-                          <div className="flex items-center gap-2 mt-1">
-                            {/* <span>Token ID: {membershipTokenId}</span>
+                        
+                        {membershipTokenId && (
+                          <div className="flex justify-between">
+                            <span className="text-green-700">Token ID:</span>
+                            <span className="flex items-center">
+                              #{membershipTokenId}
+                              <a 
+                                href={`https://sepolia-explorer.base.org/token/${community.nftContractAddress}?a=${membershipTokenId}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="ml-1 text-blue-600 hover:underline inline-flex items-center"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                                  <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z" />
+                                  <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />
+                                </svg>
+                              </a>
+                            </span>
+                          </div>
+                        )}
+                        
+                        <div className="flex justify-between">
+                          <span className="text-green-700">Contract:</span>
+                          <span className="flex items-center">
+                            <span className="font-mono text-xs truncate max-w-[150px]">
+                              {community.nftContractAddress.substring(0, 6)}...{community.nftContractAddress.substring(38)}
+                            </span>
                             <a 
-                              href={`https://sepolia-explorer.base.org/token/${community.nftContractAddress}?a=${membershipTokenId}`}
+                              href={`https://sepolia-explorer.base.org/address/${community.nftContractAddress}`}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-blue-600 hover:underline text-xs inline-flex items-center"
+                              className="ml-1 text-blue-600 hover:underline inline-flex items-center"
                             >
-                              View on Explorer <span className="ml-1">↗</span>
-                            </a> */}
-                          </div>
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                                <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z" />
+                                <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />
+                              </svg>
+                            </a>
+                          </span>
                         </div>
-                      )}
+                        
+                        {userStakedTokens && (
+                          <div className="flex justify-between">
+                            <span className="text-green-700">Your Staked:</span>
+                            <span>{userStakedTokens} $GROW</span>
+                          </div>
+                        )}
+                      </div>
                       
-                      <div className="mt-3">
+                      <div className="mt-4">
                         <Link href={`/communities/${communityId}/room`}>
                           <button className="w-full py-2 rounded-lg text-white transition-colors bg-[#008CFF] hover:bg-[#0070CC]">
                             Enter Community Room
                           </button>
                         </Link>
                       </div>
-                      
-                      {/* Stake/Unstake UI */}
-                      {/* <div className="mt-3">
-                        {!showStakeForm ? (
-                          <button 
-                            onClick={() => setShowStakeForm(true)}
-                            className="w-full py-2 rounded-lg text-zinc-800 border border-zinc-300 hover:bg-zinc-50 transition-colors mt-2"
-                          >
-                            Stake/Unstake Tokens
-                          </button>
-                        ) : (
-                          <div className="mt-3 bg-white p-3 rounded-lg border border-zinc-200">
-                            <h4 className="font-medium mb-2">Manage Your Staked Tokens</h4>
-                            
-                            <div className="mb-3">
-                              <label className="block text-xs text-zinc-500 mb-1">Stake additional tokens:</label>
-                              <div className="flex gap-2">
-                                <input
-                                  type="number"
-                                  value={stakeAmount}
-                                  onChange={(e) => setStakeAmount(e.target.value)}
-                                  placeholder="Amount to stake"
-                                  className="flex-1 p-2 text-sm border border-zinc-300 rounded"
-                                  min="0"
-                                  step="0.01"
-                                />
-                                <button
-                                  onClick={handleStakeTokens}
-                                  disabled={isStaking || !stakeAmount}
-                                  className={`px-3 py-1 rounded text-white text-sm ${
-                                    isStaking || !stakeAmount
-                                      ? 'bg-zinc-300 cursor-not-allowed'
-                                      : 'bg-green-600 hover:bg-green-700'
-                                  }`}
-                                >
-                                  {isStaking ? 'Staking...' : 'Stake'}
-                                </button>
-                              </div>
-                            </div>
-                            
-                            <div>
-                              <label className="block text-xs text-zinc-500 mb-1">Unstake tokens:</label>
-                              <div className="flex gap-2">
-                                <input
-                                  type="number"
-                                  value={unstakeAmount}
-                                  onChange={(e) => setUnstakeAmount(e.target.value)}
-                                  placeholder="Amount to unstake"
-                                  className="flex-1 p-2 text-sm border border-zinc-300 rounded"
-                                  min="0"
-                                  step="0.01"
-                                />
-                                <button
-                                  onClick={handleUnstakeTokens}
-                                  disabled={isUnstaking || !unstakeAmount}
-                                  className={`px-3 py-1 rounded text-white text-sm ${
-                                    isUnstaking || !unstakeAmount
-                                      ? 'bg-zinc-300 cursor-not-allowed'
-                                      : 'bg-red-600 hover:bg-red-700'
-                                  }`}
-                                >
-                                  {isUnstaking ? 'Unstaking...' : 'Unstake'}
-                                </button>
-                              </div>
-                              <p className="text-xs text-zinc-500 mt-1">
-                                Note: You must maintain at least the membership price ({community.nftPrice} $GROW) staked.
-                              </p>
-                            </div>
-                            
-                            {stakeError && (
-                              <div className="mt-2 bg-red-50 text-red-600 p-2 rounded text-xs">
-                                {stakeError}
-                              </div>
-                            )}
-                            
-                            {stakeSuccess && (
-                              <div className="mt-2 bg-green-50 text-green-600 p-2 rounded text-xs">
-                                Transaction successful!
-                              </div>
-                            )}
-                            
-                            <button
-                              onClick={() => {
-                                setShowStakeForm(false);
-                                setStakeAmount("");
-                                setUnstakeAmount("");
-                                setStakeError(null);
-                                setStakeSuccess(false);
-                              }}
-                              className="w-full mt-3 py-1 text-xs text-zinc-500 hover:text-zinc-700"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        )}
-                      </div> */}
                     </div>
                   </div>
                 ) : (
                   <div>
                     {purchaseStatus === 'success' ? (
-                      <div className="mt-4 bg-green-50 text-green-600 p-4 rounded-lg text-sm">
-                        <p>Membership purchased successfully! You are now a member of this community.</p>
+                      <div className="mt-4 bg-green-50 text-green-600 p-4 rounded-lg">
+                        <div className="flex items-center justify-between mb-2">
+                          <h3 className="font-medium">Membership Confirmed!</h3>
+                          <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">Active</span>
+                        </div>
                         
-                        {membershipTokenId && (
-                          <div className="mt-2 border-t border-green-100 pt-2">
-                            <div className="flex items-center gap-2 mt-1">
-                              {/* <span>Token ID: {membershipTokenId}</span>
+                        <p className="text-sm mb-3">You are now a member of this community.</p>
+                        
+                        <div className="mt-2 border-t border-green-100 pt-2 text-sm space-y-2">
+                          <div className="flex justify-between">
+                            <span className="text-green-700">Joined:</span>
+                            <span>{new Date().toLocaleDateString()} {new Date().toLocaleTimeString()}</span>
+                          </div>
+                          
+                          <div className="flex justify-between">
+                            <span className="text-green-700">Membership Fee:</span>
+                            <span>{community.nftPrice} $GROW</span>
+                          </div>
+                          
+                          {membershipTokenId && (
+                            <div className="flex justify-between">
+                              <span className="text-green-700">Token ID:</span>
+                              <span className="flex items-center">
+                                #{membershipTokenId}
+                                <a 
+                                  href={`https://sepolia-explorer.base.org/token/${community.nftContractAddress}?a=${membershipTokenId}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="ml-1 text-blue-600 hover:underline inline-flex items-center"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                                    <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z" />
+                                    <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />
+                                  </svg>
+                                </a>
+                              </span>
+                            </div>
+                          )}
+                          
+                          <div className="flex justify-between">
+                            <span className="text-green-700">Contract:</span>
+                            <span className="flex items-center">
+                              <span className="font-mono text-xs truncate max-w-[150px]">
+                                {community.nftContractAddress.substring(0, 6)}...{community.nftContractAddress.substring(38)}
+                              </span>
                               <a 
-                                href={`https://sepolia-explorer.base.org/token/${community.nftContractAddress}?a=${membershipTokenId}`}
+                                href={`https://sepolia-explorer.base.org/address/${community.nftContractAddress}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-blue-600 hover:underline text-xs inline-flex items-center"
+                                className="ml-1 text-blue-600 hover:underline inline-flex items-center"
                               >
-                                View on Explorer <span className="ml-1">↗</span>
-                              </a> */}
-                            </div>
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                                  <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z" />
+                                  <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />
+                                </svg>
+                              </a>
+                            </span>
                           </div>
-                        )}
+                          
+                          {userStakedTokens && (
+                            <div className="flex justify-between">
+                              <span className="text-green-700">Your Staked:</span>
+                              <span>{userStakedTokens} $GROW</span>
+                            </div>
+                          )}
+                        </div>
                         
-                        <div className="mt-3">
+                        <div className="mt-4">
                           <Link href={`/communities/${communityId}/room`}>
                             <button className="w-full py-2 rounded-lg text-white transition-colors bg-[#008CFF] hover:bg-[#0070CC]">
                               Enter Community Room

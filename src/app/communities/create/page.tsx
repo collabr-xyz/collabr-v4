@@ -37,7 +37,7 @@ const baseSepolia = defineChain({
 });
 
 // Deployed MembershipFactory contract address
-const LAUNCH_MEMBERSHIP_FACTORY_ADDRESS = process.env.NEXT_PUBLIC_LAUNCH_MEMBERSHIP_FACTORY_ADDRESS || "0xeDd3c1ebd02034551d6D8f08466711Ddf5FfBd20";
+const LAUNCH_MEMBERSHIP_FACTORY_ADDRESS = process.env.NEXT_PUBLIC_LAUNCH_MEMBERSHIP_FACTORY_ADDRESS || "0x322087ceC5b7278AA20205d0D93CAB5294E92e30";
 
 // $GROW token contract address
 const GROW_TOKEN_ADDRESS = process.env.NEXT_PUBLIC_GROW_TOKEN_ADDRESS || "0x2d06C90890BfE06c0538F9bf5c76d3567341a7DA";
@@ -213,7 +213,7 @@ export default function CreateCommunity() {
       setFormData(prev => ({ ...prev, deploymentStep: "Deploying new membership contract..." }));
       
       // Deploy a new membership contract for this community using the factory
-      // The factory will deploy a new LaunchMembershipV4 contract for each community
+      // The factory will deploy a new LaunchMembershipV6 contract for each community
       const deployContract = getContract({
         client,
         address: LAUNCH_MEMBERSHIP_FACTORY_ADDRESS, // The factory contract that deploys individual membership contracts

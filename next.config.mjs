@@ -6,7 +6,7 @@ const nextConfig = {
     return config;
   },
   images: {
-    domains: ['images.unsplash.com', 'api.dicebear.com', 'firebasestorage.googleapis.com'],
+    domains: ['images.unsplash.com', 'api.dicebear.com', 'firebasestorage.googleapis.com', 'avatars.githubusercontent.com'],
     dangerouslyAllowSVG: true,
     contentDispositionType: 'attachment',
     contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
