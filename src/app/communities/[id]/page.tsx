@@ -913,7 +913,7 @@ export default function CommunityDetail() {
           </div>
           <div className="mt-4">
             <Link href="/communities" className="text-[#008CFF] hover:underline">
-              ← Back to Communities
+              ← Back
             </Link>
           </div>
         </div>
@@ -927,7 +927,7 @@ export default function CommunityDetail() {
         <div className="flex justify-between items-center mb-8">
           <div>
             <Link href="/communities" className="text-zinc-500 hover:text-zinc-800 transition mb-2 inline-block">
-              ← Back to Communities
+              ← Back
             </Link>
             <h1 className="text-3xl font-medium">{community.name}</h1>
           </div>

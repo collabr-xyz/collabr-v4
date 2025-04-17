@@ -338,7 +338,7 @@ export default function CreateCommunity() {
           </div>
           <div className="flex items-center gap-4">
             <Link href="/communities" className="text-sm text-zinc-500 hover:text-zinc-800 transition">
-              Back to Communities
+              Back
             </Link>
             <ConnectButton
               client={client}
