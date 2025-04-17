@@ -121,6 +121,7 @@ export default function ChatRoom() {
   const [upvoteError, setUpvoteError] = useState<string | null>(null);
   const [upvotedToday, setUpvotedToday] = useState<{[key: string]: boolean}>({});
   const [isCreator, setIsCreator] = useState(false);
+  const [showInviteTooltip, setShowInviteTooltip] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
@@ -1180,6 +1181,23 @@ export default function ChatRoom() {
     console.log(`Attempted to redeem ${item.name} for ${item.pointsCost} points`);
   };
   
+  // Handle Twitter sharing
+  const handleTwitterShare = () => {
+    if (!community) return;
+    
+    // Create the invitation link with the community ID
+    const invitationLink = `${window.location.origin}/communities/${communityId}/join`;
+    
+    // Create the tweet text with community info
+    const tweetText = `I'm part of the "${community.name}" community on Collabr!`;
+    
+    // Construct the Twitter share URL
+    const twitterShareUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}&url=${encodeURIComponent(invitationLink)}`;
+    
+    // Open Twitter share in a new window
+    window.open(twitterShareUrl, '_blank', 'width=550,height=420');
+  };
+  
   // Additional effect to refresh members list when profile status changes - with guards
   useEffect(() => {
     if (profileChecked && userStatus === 'member' && activeAccount?.address && !refreshingMembersRef.current) {
@@ -1768,6 +1786,14 @@ export default function ChatRoom() {
         </div>
         
         <div className="mt-auto">
+          {userStatus === 'member' && (
+            <button 
+              onClick={handleTwitterShare}
+              className="w-full py-2 px-3 text-sm text-[#008CFF] hover:text-white bg-blue-50 hover:bg-[#008CFF] rounded-md transition flex items-center justify-center mb-3"
+            >
+              Send Invitation
+            </button>
+          )}
           <Link 
             href="/communities" 
             className="w-full py-2 px-3 text-sm text-zinc-600 hover:text-zinc-900 bg-gray-100 hover:bg-gray-200 rounded-md transition flex items-center justify-center"
