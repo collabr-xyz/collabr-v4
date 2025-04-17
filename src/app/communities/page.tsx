@@ -67,10 +67,6 @@ export default function Communities() {
   const [showSortMenu, setShowSortMenu] = useState(false); // For dropdown menu
   const activeAccount = useActiveAccount();
   
-  // Check if current user is approved to create communities
-  const isApprovedCreator = activeAccount ? 
-    APPROVED_CREATORS.includes(activeAccount.address) : false;
-  
   // Function to check if user is creator of a community
   const isCreatorOf = (community: Community) => {
     return activeAccount && activeAccount.address === community.creatorAddress;
@@ -260,7 +256,7 @@ export default function Communities() {
             <p className="text-zinc-500 mt-1 text-sm">Discover and join communities with NFT memberships</p>
           </div>
           <div className="flex items-center gap-4">
-            {isApprovedCreator && (
+            {activeAccount && (
               <Link href="/communities/create" className="px-4 py-2 bg-[#008CFF] text-white rounded-full hover:bg-[#0070CC] transition">
                 Create Club
               </Link>
@@ -390,7 +386,7 @@ export default function Communities() {
           <div className="text-center py-20 bg-white rounded-md shadow-sm">
             <h2 className="text-xl font-medium mb-4">No Clubs Yet</h2>
             <p className="text-zinc-500 mb-6">Be the first to create a club!</p>
-            {isApprovedCreator && (
+            {activeAccount && (
               <Link href="/communities/create" className="px-6 py-3 bg-[#008CFF] text-white rounded-full hover:bg-[#0070CC] transition">
                 Create Club
               </Link>
@@ -435,12 +431,12 @@ export default function Communities() {
                     </div>
                     
                     <div className="flex items-center mt-2 text-xs text-zinc-500">
-                      <button className="flex items-center hover:bg-gray-100 rounded-full px-2 py-1 mr-2">
+                      {/* <button className="flex items-center hover:bg-gray-100 rounded-full px-2 py-1 mr-2">
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                         </svg>
                         Comments
-                      </button>
+                      </button> */}
                       <button className="flex items-center hover:bg-gray-100 rounded-full px-2 py-1 mr-2">
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />

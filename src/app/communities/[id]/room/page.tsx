@@ -120,6 +120,7 @@ export default function ChatRoom() {
   const [isUpvoting, setIsUpvoting] = useState(false);
   const [upvoteError, setUpvoteError] = useState<string | null>(null);
   const [upvotedToday, setUpvotedToday] = useState<{[key: string]: boolean}>({});
+  const [isCreator, setIsCreator] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
@@ -461,6 +462,13 @@ export default function ChatRoom() {
           const communityData = { id: communityDoc.id, ...communityDoc.data() } as Community;
           setCommunity(communityData);
           
+          // Check if current user is the creator
+          if (activeAccount?.address && communityData.creatorAddress) {
+            setIsCreator(activeAccount.address.toLowerCase() === communityData.creatorAddress.toLowerCase());
+          } else {
+            setIsCreator(false);
+          }
+          
           // Fetch staked tokens if we have the contract address
           if (communityData.nftContractAddress) {
             fetchStakedTokens(communityData.nftContractAddress);
@@ -474,7 +482,7 @@ export default function ChatRoom() {
       }
     }
     fetchCommunity();
-  }, [communityId]);
+  }, [communityId, activeAccount?.address]);
   
   // Function to fetch staked tokens
   const fetchStakedTokens = async (contractAddress: string) => {
@@ -488,66 +496,51 @@ export default function ChatRoom() {
         chain: baseSepolia,
       });
       
-      // Check if contract supports staking functions before calling them
-      let supportsStaking = false;
+      // Check if contract supports stored tokens functions before calling them
+      let supportsTokenStorage = false;
       try {
-        // Try to call a simple view function to test if staking is implemented
+        // Try to call a simple view function to test if token storage is implemented
         await readContract({
           contract,
-          method: "function totalStakedTokens() view returns (uint256)",
+          method: "function getStoredTokens() view returns (uint256)",
           params: []
         });
-        supportsStaking = true;
-        setStakingSupported(true);
+        supportsTokenStorage = true;
+        setStakingSupported(true); // Reusing the state variable for UI compatibility
       } catch (error) {
-        console.log("This contract does not support staking features", error);
-        supportsStaking = false;
+        console.log("This contract does not support token storage features", error);
+        supportsTokenStorage = false;
         setStakingSupported(false);
-        // Set default values if staking is not supported
+        // Set default values if token storage is not supported
         setTotalStakedTokens("0");
         setUserStakedTokens("0");
-        return; // Exit early if staking is not supported
+        return; // Exit early if token storage is not supported
       }
       
-      if (supportsStaking) {
-        // Fetch total staked tokens
+      if (supportsTokenStorage) {
+        // Fetch total stored tokens
         try {
-          const stakedTokens = await readContract({
+          const storedTokens = await readContract({
             contract,
-            method: "function totalStakedTokens() view returns (uint256)",
+            method: "function getStoredTokens() view returns (uint256)",
             params: []
           });
           
           // Convert from wei to tokens with 2 decimal places for display
-          const stakedTokensInEther = (Number(stakedTokens) / 1e18).toFixed(2);
-          setTotalStakedTokens(stakedTokensInEther);
-        } catch (stakedTokensError) {
-          console.error("Error fetching total staked tokens:", stakedTokensError);
+          const storedTokensInEther = (Number(storedTokens) / 1e18).toFixed(2);
+          setTotalStakedTokens(storedTokensInEther); // Reusing the state variable for UI compatibility
+        } catch (storedTokensError) {
+          console.error("Error fetching total stored tokens:", storedTokensError);
           // Set a default value to prevent UI from breaking
           setTotalStakedTokens("0");
         }
         
-        // Fetch user's staked tokens if user is connected
-        if (activeAccount?.address) {
-          try {
-            const userStaked = await readContract({
-              contract,
-              method: "function getStakedTokens(address) view returns (uint256)",
-              params: [activeAccount.address]
-            });
-            
-            // Convert from wei to tokens with 2 decimal places for display
-            const userStakedInEther = (Number(userStaked) / 1e18).toFixed(2);
-            setUserStakedTokens(userStakedInEther);
-          } catch (userStakedError) {
-            console.error("Error fetching user staked tokens:", userStakedError);
-            // Set a default value to prevent UI from breaking
-            setUserStakedTokens("0");
-          }
-        }
+        // We don't fetch user's staked tokens since those are now stored in the contract
+        // Instead, we set userStakedTokens to 0 
+        setUserStakedTokens("0");
       }
     } catch (err) {
-      console.error("Error fetching staked tokens:", err);
+      console.error("Error fetching stored tokens:", err);
       // Set default values if the contract has issues
       setTotalStakedTokens("0");
       setUserStakedTokens("0");
@@ -1667,12 +1660,12 @@ export default function ChatRoom() {
         {/* Staked Tokens Section */}
         <div className="mb-6">
           <div className="text-xs uppercase text-zinc-500 font-medium mb-2 flex justify-between items-center">
-            <span>Staked Tokens</span>
+            <span>Stored Tokens</span>
             {community?.nftContractAddress && (
               <button 
                 onClick={() => fetchStakedTokens(community.nftContractAddress)} 
                 className="text-xs text-zinc-400 hover:text-[#008CFF]"
-                title="Refresh staked tokens"
+                title="Refresh stored tokens"
                 disabled={fetchingTokens}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className={`h-3 w-3 ${fetchingTokens ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1685,12 +1678,12 @@ export default function ChatRoom() {
           <div className="bg-white border border-gray-200 rounded-md p-3">
             {stakingSupported === false ? (
               <div className="text-sm text-zinc-500 text-center py-1">
-                Staking not available for this community
+                Token storage not available for this community
               </div>
             ) : (
               <>
                 <div className="flex justify-between items-center mb-2">
-                  <span className="text-sm text-zinc-600">Total Staked:</span>
+                  <span className="text-sm text-zinc-600">Total Stored:</span>
                   {fetchingTokens ? (
                     <div className="animate-pulse h-4 w-16 bg-gray-200 rounded"></div>
                   ) : (
@@ -1698,25 +1691,13 @@ export default function ChatRoom() {
                   )}
                 </div>
                 
-                {activeAccount?.address && userStakedTokens && Number(userStakedTokens) > 0 && (
-                  <div className="flex justify-between items-center pt-2 border-t border-gray-100">
-                    <span className="text-sm text-zinc-600">Your Stake:</span>
-                    {fetchingTokens ? (
-                      <div className="animate-pulse h-4 w-16 bg-gray-200 rounded"></div>
-                    ) : (
-                      <span className="text-sm font-medium">{userStakedTokens} $GROW</span>
-                    )}
-                  </div>
-                )}
-                
-                {/* Add Manage Stake link */}
-                {/* {activeAccount?.address && userStatus === 'member' && stakingSupported && (
+                {isCreator && community && activeAccount?.address === community.creatorAddress && (
                   <div className="mt-3 pt-2 border-t border-gray-100">
                     <Link href={`/communities/${communityId}`} className="text-xs text-[#008CFF] hover:underline">
-                      Manage your stake →
+                      Claim community tokens →
                     </Link>
                   </div>
-                )} */}
+                )}
               </>
             )}
           </div>

@@ -74,7 +74,7 @@ export default function CommunityDetail() {
   const [community, setCommunity] = useState<Community | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [purchaseStatus, setPurchaseStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [purchaseStatus, setPurchaseStatus] = useState<'idle' | 'loading' | 'processing' | 'success' | 'error'>('idle');
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
   const [isCreator, setIsCreator] = useState(false);
   const [showPriceUpdateForm, setShowPriceUpdateForm] = useState(false);
@@ -86,14 +86,11 @@ export default function CommunityDetail() {
   const [membershipTokenId, setMembershipTokenId] = useState<string | null>(null);
   const [isUserMember, setIsUserMember] = useState(false);
   const [totalStakedTokens, setTotalStakedTokens] = useState<string | null>(null);
-  const [userStakedTokens, setUserStakedTokens] = useState<string | null>(null);
-  const [showStakeForm, setShowStakeForm] = useState(false);
-  const [stakeAmount, setStakeAmount] = useState("");
-  const [unstakeAmount, setUnstakeAmount] = useState("");
-  const [isStaking, setIsStaking] = useState(false);
-  const [isUnstaking, setIsUnstaking] = useState(false);
-  const [stakeError, setStakeError] = useState<string | null>(null);
-  const [stakeSuccess, setStakeSuccess] = useState(false);
+  const [showClaimForm, setShowClaimForm] = useState(false);
+  const [claimAmount, setClaimAmount] = useState("");
+  const [isClaiming, setIsClaiming] = useState(false);
+  const [claimError, setClaimError] = useState<string | null>(null);
+  const [claimSuccess, setClaimSuccess] = useState(false);
   
   // Function to check if multiple communities share the same contract address
   async function checkForSharedContracts(contractAddress: string, currentCommunityId: string) {
@@ -164,17 +161,17 @@ export default function CommunityDetail() {
               
               // Fetch total staked tokens
               try {
-                const stakedTokens = await readContract({
+                const storedTokens = await readContract({
                   contract,
-                  method: "function totalStakedTokens() view returns (uint256)",
+                  method: "function getStoredTokens() view returns (uint256)",
                   params: []
                 });
                 
                 // Convert from wei to tokens with 2 decimal places for display
-                const stakedTokensInEther = (Number(stakedTokens) / 1e18).toFixed(2);
-                setTotalStakedTokens(stakedTokensInEther);
-              } catch (stakedTokensError) {
-                console.error("Error fetching total staked tokens:", stakedTokensError);
+                const storedTokensInEther = (Number(storedTokens) / 1e18).toFixed(2);
+                setTotalStakedTokens(storedTokensInEther);
+              } catch (storedTokensError) {
+                console.error("Error fetching stored tokens:", storedTokensError);
               }
               
               // Check if the active account is a member
@@ -203,21 +200,6 @@ export default function CommunityDetail() {
                       }
                     } catch (tokenIdError) {
                       console.error("Error retrieving NFT token ID:", tokenIdError);
-                    }
-                    
-                    // Get user's staked tokens
-                    try {
-                      const userStaked = await readContract({
-                        contract,
-                        method: "function getStakedTokens(address) view returns (uint256)",
-                        params: [activeAccount.address]
-                      });
-                      
-                      // Convert from wei to tokens with 2 decimal places for display
-                      const userStakedInEther = (Number(userStaked) / 1e18).toFixed(2);
-                      setUserStakedTokens(userStakedInEther);
-                    } catch (userStakedError) {
-                      console.error("Error fetching user staked tokens:", userStakedError);
                     }
                   }
                 } catch (membershipCheckError) {
@@ -567,99 +549,91 @@ export default function CommunityDetail() {
           return;
         }
         
-        // Show waiting message
-        setPurchaseError("Purchase submitted! Waiting for confirmation...");
+        // Wait for transaction to process
+        setPurchaseStatus('processing');
+        setPurchaseError("Waiting for confirmation...");
+        await new Promise(resolve => setTimeout(resolve, 15000));
         
-        // Wait for transaction to be processed
-        console.log("Waiting for transaction confirmation...");
-        await new Promise(resolve => setTimeout(resolve, 20000)); // 20 seconds wait
-        
-        // Check if the NFT was minted to the user
-        console.log("Checking NFT balance...");
-        const balanceOfNFT = await readContract({
+        // Verify that the transaction worked by checking if user is now a member
+        const isMember = await readContract({
           contract,
-          method: "function balanceOf(address) view returns (uint256)",
+          method: "function isMember(address) view returns (bool)",
           params: [activeAccount.address]
         });
-        console.log("User NFT balance after purchase:", balanceOfNFT.toString());
         
-        if (balanceOfNFT < 1n) {
-          // Check again after a delay
-          console.log("NFT not yet detected. Checking again in 10 seconds...");
-          await new Promise(resolve => setTimeout(resolve, 10000));
-          
-          const finalNFTBalance = await readContract({
-            contract,
-            method: "function balanceOf(address) view returns (uint256)",
-            params: [activeAccount.address]
-          });
-          
-          console.log("Final NFT balance check:", finalNFTBalance.toString());
-          
-          if (finalNFTBalance < 1n) {
-            throw new Error("Membership purchase may have failed. Please check your wallet for transaction status.");
-          }
-        }
-        
-        // Success!
-        setPurchaseError(null);
-        setPurchaseStatus('success');
-        setIsUserMember(true);
-        
-        // Get the token ID of the NFT the user received
-        try {
+        if (isMember) {
           // Get the tokenId of the user's membership NFT
-          const ownerTokens = await readContract({
-            contract,
-            method: "function tokensOfOwner(address) view returns (uint256[])",
-            params: [activeAccount.address]
-          });
-          
-          if (ownerTokens && ownerTokens.length > 0) {
-            // Get the most recent token (likely the one just minted)
-            const tokenId = ownerTokens[ownerTokens.length - 1].toString();
-            setMembershipTokenId(tokenId);
-            console.log("User received NFT with token ID:", tokenId);
-          } else {
-            console.log("Could not retrieve user's NFT token ID");
+          try {
+            const ownerTokens = await readContract({
+              contract,
+              method: "function tokensOfOwner(address) view returns (uint256[])",
+              params: [activeAccount.address]
+            });
+            
+            if (ownerTokens && ownerTokens.length > 0) {
+              // Get the most recent token
+              const tokenId = ownerTokens[ownerTokens.length - 1].toString();
+              setMembershipTokenId(tokenId);
+            }
+          } catch (tokenIdError) {
+            console.error("Error retrieving NFT token ID:", tokenIdError);
           }
-        } catch (tokenIdError) {
-          console.error("Error retrieving NFT token ID:", tokenIdError);
-          // This is non-critical, so we continue even if it fails
-        }
-        
-        // Add member to Firestore database for chat functionality
-        try {
-          await addDoc(collection(db, "members"), {
-            communityId,
-            walletAddress: activeAccount.address,
-            displayName: activeAccount.address.substring(0, 6) + '...',
-            joinedAt: new Date().toISOString()
-          });
-          console.log("Member added to Firestore for chat functionality");
-        } catch (memberError) {
-          console.error("Error adding member to Firestore:", memberError);
-          // We don't want to revert the successful purchase if this fails
-        }
-        
-        // Refresh the member count after successful purchase
-        try {
-          const totalMembers = await readContract({
-            contract,
-            method: "function totalMembers() view returns (uint256)",
-            params: []
-          });
           
-          setMemberCount(Number(totalMembers));
-        } catch (error) {
-          console.error("Error updating member count:", error);
+          // Also fetch the updated stored tokens amount
+          try {
+            const storedTokens = await readContract({
+              contract,
+              method: "function getStoredTokens() view returns (uint256)",
+              params: []
+            });
+            
+            const storedTokensInEther = (Number(storedTokens) / 1e18).toFixed(2);
+            setTotalStakedTokens(storedTokensInEther);
+          } catch (error) {
+            console.error("Error fetching updated stored tokens:", error);
+          }
+          
+          // Set the user as a member
+          setIsUserMember(true);
+          setPurchaseStatus('success');
+          setPurchaseError(null);
+          
+          // Add user to Firestore members collection
+          try {
+            await addDoc(collection(db, "members"), {
+              communityId,
+              walletAddress: activeAccount.address,
+              displayName: activeAccount.address.substring(0, 6) + '...',
+              joinedAt: new Date().toISOString()
+            });
+            console.log("Member added to Firestore for chat functionality");
+          } catch (memberError) {
+            console.error("Error adding member to Firestore:", memberError);
+            // We don't want to revert the successful purchase if this fails
+          }
+          
+          // Refresh the member count after successful purchase
+          try {
+            const totalMembers = await readContract({
+              contract,
+              method: "function totalMembers() view returns (uint256)",
+              params: []
+            });
+            
+            setMemberCount(Number(totalMembers));
+          } catch (error) {
+            console.error("Error updating member count:", error);
+          }
+          
+          // Auto-redirect to community room after successful purchase
+          setTimeout(() => {
+            console.log("Redirecting to community room...");
+            router.push(`/communities/${communityId}/room`);
+          }, 1000); // Small delay to ensure state is updated
+        } else {
+          setPurchaseStatus('error');
+          setPurchaseError("Membership purchase may have failed. Please check your wallet for transaction status.");
         }
-        
-        // Auto-redirect to community room after successful purchase
-        setTimeout(() => {
-          console.log("Redirecting to community room...");
-          router.push(`/communities/${communityId}/room`);
-        }, 1000); // Small delay to ensure state is updated
       } catch (error) {
         console.error("Error during purchase transaction:", error);
         
@@ -797,144 +771,20 @@ export default function CommunityDetail() {
     }
   };
   
-  // Add function to handle staking tokens
-  const handleStakeTokens = async () => {
-    if (!activeAccount || !community || !isUserMember) return;
+  // Add function to handle claiming tokens
+  const handleClaimTokens = async () => {
+    if (!activeAccount || !community) return;
     
-    try {
-      setIsStaking(true);
-      setStakeError(null);
-      setStakeSuccess(false);
-      
-      // Get the membership contract
-      const contract = getContract({
-        client,
-        address: community.nftContractAddress,
-        chain: baseSepolia,
-      });
-      
-      // Convert the stake amount to token units with 18 decimals
-      const amount = parseFloat(stakeAmount);
-      if (isNaN(amount) || amount <= 0) {
-        throw new Error("Please enter a valid amount to stake");
-      }
-      
-      const tokenAmount = BigInt(Math.floor(amount * 1e18));
-      console.log("Staking tokens amount:", tokenAmount.toString());
-      
-      // Get the GROW token address
-      const growTokenAddress = process.env.NEXT_PUBLIC_GROW_TOKEN_ADDRESS || "0x2d06C90890BfE06c0538F9bf5c76d3567341a7DA";
-      
-      // Get the GROW token contract
-      const tokenContract = getContract({
-        client,
-        address: growTokenAddress,
-        chain: baseSepolia,
-      });
-      
-      // Check user's token balance
-      const userBalance = await readContract({
-        contract: tokenContract,
-        method: "function balanceOf(address) view returns (uint256)",
-        params: [activeAccount.address]
-      });
-      
-      if (userBalance < tokenAmount) {
-        throw new Error(`Insufficient $GROW tokens. You need ${amount} but have ${Number(userBalance) / 1e18}.`);
-      }
-      
-      // Check if approval is needed
-      const currentAllowance = await readContract({
-        contract: tokenContract,
-        method: "function allowance(address,address) view returns (uint256)",
-        params: [activeAccount.address, community.nftContractAddress]
-      });
-      
-      // Approve tokens if needed
-      if (currentAllowance < tokenAmount) {
-        setStakeError("Please approve $GROW tokens to continue...");
-        
-        const approveTx = prepareContractCall({
-          contract: tokenContract,
-          method: "function approve(address,uint256)",
-          params: [community.nftContractAddress, tokenAmount],
-        });
-        
-        await sendTransaction(approveTx);
-        
-        // Wait for transaction to be processed
-        setStakeError("Waiting for approval confirmation...");
-        await new Promise(resolve => setTimeout(resolve, 15000));
-        
-        // Check if approval succeeded
-        const newAllowance = await readContract({
-          contract: tokenContract,
-          method: "function allowance(address,address) view returns (uint256)",
-          params: [activeAccount.address, community.nftContractAddress]
-        });
-        
-        if (newAllowance < tokenAmount) {
-          throw new Error("Token approval failed. Please try again.");
-        }
-        
-        setStakeError(null);
-      }
-      
-      // Stake the tokens
-      setStakeError("Staking tokens...");
-      const stakeTx = prepareContractCall({
-        contract,
-        method: "function stakeTokens(uint256)",
-        params: [tokenAmount],
-        gas: 300000n,
-      });
-      
-      await sendTransaction(stakeTx);
-      
-      // Wait for transaction to process
-      setStakeError("Waiting for transaction confirmation...");
-      await new Promise(resolve => setTimeout(resolve, 15000));
-      
-      // Get updated staked tokens
-      const userStaked = await readContract({
-        contract,
-        method: "function getStakedTokens(address) view returns (uint256)",
-        params: [activeAccount.address]
-      });
-      
-      const userStakedInEther = (Number(userStaked) / 1e18).toFixed(2);
-      setUserStakedTokens(userStakedInEther);
-      
-      // Get updated total staked tokens
-      const totalStaked = await readContract({
-        contract,
-        method: "function totalStakedTokens() view returns (uint256)",
-        params: []
-      });
-      
-      const totalStakedInEther = (Number(totalStaked) / 1e18).toFixed(2);
-      setTotalStakedTokens(totalStakedInEther);
-      
-      setStakeSuccess(true);
-      setStakeAmount("");
-      setStakeError(null);
-      setTimeout(() => setShowStakeForm(false), 3000);
-    } catch (error) {
-      console.error("Error staking tokens:", error);
-      setStakeError(error instanceof Error ? error.message : "Failed to stake tokens");
-    } finally {
-      setIsStaking(false);
+    // Verify user is the creator
+    if (activeAccount.address.toLowerCase() !== community.creatorAddress.toLowerCase()) {
+      setClaimError("Only the community creator can claim tokens");
+      return;
     }
-  };
-  
-  // Add function to handle unstaking tokens
-  const handleUnstakeTokens = async () => {
-    if (!activeAccount || !community || !isUserMember) return;
     
     try {
-      setIsUnstaking(true);
-      setStakeError(null);
-      setStakeSuccess(false);
+      setIsClaiming(true);
+      setClaimError(null);
+      setClaimSuccess(false);
       
       // Get the membership contract
       const contract = getContract({
@@ -943,81 +793,50 @@ export default function CommunityDetail() {
         chain: baseSepolia,
       });
       
-      // Convert the unstake amount to token units with 18 decimals
-      const amount = parseFloat(unstakeAmount);
+      // Convert the claim amount to token units with 18 decimals
+      const amount = parseFloat(claimAmount);
       if (isNaN(amount) || amount <= 0) {
-        throw new Error("Please enter a valid amount to unstake");
+        throw new Error("Please enter a valid amount to claim");
       }
       
       const tokenAmount = BigInt(Math.floor(amount * 1e18));
-      console.log("Unstaking tokens amount:", tokenAmount.toString());
+      console.log("Claiming tokens amount:", tokenAmount.toString());
       
-      // Check if user has enough staked tokens
-      const userStaked = await readContract({
+      // Call the claimTokens function
+      setClaimError("Claiming tokens...");
+      const claimTx = prepareContractCall({
         contract,
-        method: "function getStakedTokens(address) view returns (uint256)",
-        params: [activeAccount.address]
-      });
-      
-      if (userStaked < tokenAmount) {
-        throw new Error(`Insufficient staked tokens. You only have ${Number(userStaked) / 1e18} $GROW staked.`);
-      }
-      
-      // Get membership price to check minimum stake requirement
-      const membershipPrice = await readContract({
-        contract,
-        method: "function membershipPrice() view returns (uint256)",
-        params: []
-      });
-      
-      if (userStaked - tokenAmount < membershipPrice) {
-        throw new Error(`You must maintain at least ${Number(membershipPrice) / 1e18} $GROW staked for your membership.`);
-      }
-      
-      // Unstake the tokens
-      setStakeError("Unstaking tokens...");
-      const unstakeTx = prepareContractCall({
-        contract,
-        method: "function unstakeTokens(uint256)",
+        method: "function claimTokens(uint256)",
         params: [tokenAmount],
         gas: 300000n,
       });
       
-      await sendTransaction(unstakeTx);
+      await sendTransaction(claimTx);
       
       // Wait for transaction to process
-      setStakeError("Waiting for transaction confirmation...");
+      setClaimError("Waiting for transaction confirmation...");
       await new Promise(resolve => setTimeout(resolve, 15000));
       
-      // Get updated staked tokens
-      const newUserStaked = await readContract({
+      // Get updated stored tokens
+      const storedTokens = await readContract({
         contract,
-        method: "function getStakedTokens(address) view returns (uint256)",
-        params: [activeAccount.address]
-      });
-      
-      const userStakedInEther = (Number(newUserStaked) / 1e18).toFixed(2);
-      setUserStakedTokens(userStakedInEther);
-      
-      // Get updated total staked tokens
-      const totalStaked = await readContract({
-        contract,
-        method: "function totalStakedTokens() view returns (uint256)",
+        method: "function getStoredTokens() view returns (uint256)",
         params: []
       });
       
-      const totalStakedInEther = (Number(totalStaked) / 1e18).toFixed(2);
-      setTotalStakedTokens(totalStakedInEther);
+      // Convert from wei to tokens with 2 decimal places for display
+      const storedTokensInEther = (Number(storedTokens) / 1e18).toFixed(2);
+      setTotalStakedTokens(storedTokensInEther);
       
-      setStakeSuccess(true);
-      setUnstakeAmount("");
-      setStakeError(null);
-      setTimeout(() => setShowStakeForm(false), 3000);
+      setClaimSuccess(true);
+      setClaimAmount("");
+      setClaimError(null);
+      setTimeout(() => setShowClaimForm(false), 3000);
     } catch (error) {
-      console.error("Error unstaking tokens:", error);
-      setStakeError(error instanceof Error ? error.message : "Failed to unstake tokens");
+      console.error("Error claiming tokens:", error);
+      setClaimError(error instanceof Error ? error.message : "Failed to claim tokens");
     } finally {
-      setIsUnstaking(false);
+      setIsClaiming(false);
     }
   };
   
@@ -1143,12 +962,12 @@ export default function CommunityDetail() {
                   <span className="text-zinc-500">Membership Price:</span>
                   <span className="font-medium">{community.nftPrice} $GROW</span>
                 </div>
-                <div className="flex justify-between">
+                {/* <div className="flex justify-between">
                   <span className="text-zinc-500">Membership Limit:</span>
                   <span>{memberCount !== null ? `${memberCount} / ` : ''}{community.membershipLimit} members</span>
-                </div>
+                </div> */}
                 <div className="flex justify-between">
-                  <span className="text-zinc-500">Total Staked:</span>
+                  <span className="text-zinc-500">Stored Tokens:</span>
                   <span className="font-medium">{totalStakedTokens ?? '...'} $GROW</span>
                 </div>
                 <div className="flex justify-between">
@@ -1276,6 +1095,85 @@ export default function CommunityDetail() {
                     <div className="mt-4 bg-blue-50 text-blue-600 p-4 rounded-lg text-sm">
                       As the creator of this community, you have full access to manage and participate.
                     </div>
+                    
+                    {/* Add Token Claim UI for Creators */}
+                    {totalStakedTokens && Number(totalStakedTokens) > 0 && (
+                      <div className="mt-4">
+                        <h4 className="font-medium mb-2">Community Tokens</h4>
+                        <div className="p-4 border border-gray-200 rounded-lg">
+                          <div className="flex justify-between items-center mb-3">
+                            <span className="text-zinc-600">Total Stored:</span>
+                            <span className="font-medium">{totalStakedTokens} $GROW</span>
+                          </div>
+                          
+                          {!showClaimForm ? (
+                            <button
+                              onClick={() => setShowClaimForm(true)}
+                              className="w-full py-2 px-4 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
+                            >
+                              Claim Tokens
+                            </button>
+                          ) : (
+                            <div className="border-t border-gray-200 pt-3 mt-3">
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Amount to Claim
+                              </label>
+                              <div className="flex space-x-2 mb-3">
+                                <input
+                                  type="number"
+                                  value={claimAmount}
+                                  onChange={(e) => setClaimAmount(e.target.value)}
+                                  placeholder="Enter amount"
+                                  className="flex-1 p-2 border border-gray-300 rounded-md"
+                                  min="0"
+                                  max={totalStakedTokens}
+                                  step="0.01"
+                                />
+                                <button
+                                  onClick={() => setClaimAmount(totalStakedTokens || "0")}
+                                  className="px-2 py-1 bg-gray-200 text-gray-700 text-xs rounded"
+                                >
+                                  Max
+                                </button>
+                              </div>
+                              
+                              <div className="flex space-x-2">
+                                <button
+                                  onClick={handleClaimTokens}
+                                  disabled={isClaiming}
+                                  className={`flex-1 py-2 rounded-lg text-white transition-colors ${
+                                    isClaiming
+                                      ? 'bg-gray-400 cursor-not-allowed'
+                                      : 'bg-green-600 hover:bg-green-700'
+                                  }`}
+                                >
+                                  {isClaiming ? 'Claiming...' : 'Claim'}
+                                </button>
+                                <button
+                                  onClick={() => setShowClaimForm(false)}
+                                  disabled={isClaiming}
+                                  className="flex-1 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                              
+                              {claimError && (
+                                <div className="mt-3 p-2 bg-red-50 text-red-600 text-sm rounded-lg">
+                                  {claimError}
+                                </div>
+                              )}
+                              
+                              {claimSuccess && (
+                                <div className="mt-3 p-2 bg-green-50 text-green-600 text-sm rounded-lg">
+                                  Tokens claimed successfully!
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : isUserMember ? (
                   <div>
@@ -1332,13 +1230,6 @@ export default function CommunityDetail() {
                             </a>
                           </span>
                         </div>
-                        
-                        {userStakedTokens && (
-                          <div className="flex justify-between">
-                            <span className="text-green-700">Your Staked:</span>
-                            <span>{userStakedTokens} $GROW</span>
-                          </div>
-                        )}
                       </div>
                       
                       <div className="mt-4">
@@ -1411,13 +1302,6 @@ export default function CommunityDetail() {
                               </a>
                             </span>
                           </div>
-                          
-                          {userStakedTokens && (
-                            <div className="flex justify-between">
-                              <span className="text-green-700">Your Staked:</span>
-                              <span>{userStakedTokens} $GROW</span>
-                            </div>
-                          )}
                         </div>
                         
                         <div className="mt-4">
@@ -1432,16 +1316,18 @@ export default function CommunityDetail() {
                       <>
                         <button
                           onClick={handlePurchaseMembership}
-                          disabled={purchaseStatus === 'loading'}
+                          disabled={purchaseStatus === 'loading' || purchaseStatus === 'processing'}
                           className={`w-full py-3 rounded-lg text-white transition-colors ${
-                            purchaseStatus === 'loading'
+                            purchaseStatus === 'loading' || purchaseStatus === 'processing'
                               ? 'bg-zinc-300 cursor-not-allowed'
                               : 'bg-[#008CFF] hover:bg-[#0070CC]'
                           }`}
                         >
                           {purchaseStatus === 'loading' 
                             ? 'Processing... Please check your wallet for approval' 
-                            : `Purchase Membership for ${community.nftPrice} $GROW`}
+                            : purchaseStatus === 'processing'
+                              ? 'Confirming transaction...'
+                              : `Purchase Membership for ${community.nftPrice} $GROW`}
                         </button>
                         
                         {purchaseStatus === 'error' && purchaseError && (
