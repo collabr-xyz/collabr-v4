@@ -223,6 +223,9 @@ export default function CreateCommunity() {
       // Convert the price to token units with 18 decimals
       const priceInTokens = BigInt(Math.floor(nftPrice * 1e18));
       
+      // Wrap contract deployment in a separate try-catch to properly handle contract failures
+      let newContractAddress: string = "";
+      
       try {
         // Deploy a new contract with all the parameters set correctly from the start
         const deployTx = prepareContractCall({
@@ -259,7 +262,7 @@ export default function CreateCommunity() {
         
         // Get the most recently deployed contract by this user
         // Note: In production, you should use event logs to get this address reliably
-        const newContractAddress = await readContract({
+        newContractAddress = await readContract({
           contract: factoryContract,
           method: "function getLastDeployedContract(address) view returns (address)",
           params: [activeAccount.address]
@@ -275,47 +278,49 @@ export default function CreateCommunity() {
           deploymentStep: "Contract deployed successfully! Creating community..." 
         }));
         
-        // Create community data for your database
-        const communityData = {
-          name: updatedFormData.name,
-          description: updatedFormData.description,
-          image: updatedFormData.image,
-          tags: tagsArray,
-          membershipLimit,
-          nftContractAddress: newContractAddress, // Use the new unique contract address
-          nftPrice,
-          nftImage: updatedFormData.image, // Store the same image URL for the NFT
-          paymentTokenAddress: GROW_TOKEN_ADDRESS,
-          paymentTokenSymbol: "GROW",
-          creatorAddress: activeAccount.address,
-          createdAt: new Date().toISOString(),
-        };
-        
-        // Save community data to Firebase
-        try {
-          // Add a new document to the "communities" collection
-          const docRef = await addDoc(collection(db, "communities"), communityData);
-          console.log("Community saved with ID:", docRef.id);
-          
-          // Redirect to the new community page
-          router.push(`/communities/${docRef.id}`);
-        } catch (firestoreError) {
-          console.error("Error saving to Firestore:", firestoreError);
-          setFormData(prev => ({ 
-            ...prev, 
-            isLoading: false, 
-            error: "Failed to save community data to Firebase. Please try again." 
-          }));
-        }
       } catch (contractError) {
         console.error("Contract deployment error:", contractError);
         setFormData(prev => ({ 
           ...prev, 
-          isLoading: false, 
-          error: "Failed to deploy membership contract. Please try again."
+          isLoading: false,
+          deploymentStep: "",
+          error: "Failed to deploy membership contract. The club was not created. Please try again."
         }));
-        // Don't proceed to Firebase operations when contract deployment fails
-        return;
+        return; // Exit the entire function, don't proceed to Firebase operations
+      }
+      
+      // Only proceed to Firebase operations if contract deployment was successful
+      // Create community data for your database
+      const communityData = {
+        name: updatedFormData.name,
+        description: updatedFormData.description,
+        image: updatedFormData.image,
+        tags: tagsArray,
+        membershipLimit,
+        nftContractAddress: newContractAddress, // Use the new unique contract address
+        nftPrice,
+        nftImage: updatedFormData.image, // Store the same image URL for the NFT
+        paymentTokenAddress: GROW_TOKEN_ADDRESS,
+        paymentTokenSymbol: "GROW",
+        creatorAddress: activeAccount.address,
+        createdAt: new Date().toISOString(),
+      };
+      
+      // Save community data to Firebase
+      try {
+        // Add a new document to the "communities" collection
+        const docRef = await addDoc(collection(db, "communities"), communityData);
+        console.log("Community saved with ID:", docRef.id);
+        
+        // Redirect to the new community page
+        router.push(`/communities/${docRef.id}`);
+      } catch (firestoreError) {
+        console.error("Error saving to Firestore:", firestoreError);
+        setFormData(prev => ({ 
+          ...prev, 
+          isLoading: false, 
+          error: "Failed to save community data to Firebase. Please try again." 
+        }));
       }
     } catch (error) {
       console.error("Error creating community:", error);
@@ -529,8 +534,14 @@ export default function CreateCommunity() {
             
             {/* Error message */}
             {formData.error && (
-              <div className="bg-red-50 text-red-600 p-4 rounded-lg text-sm">
-                {formData.error}
+              <div className="bg-red-50 text-red-600 p-4 rounded-lg text-sm font-medium border border-red-200">
+                <div className="flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                  </svg>
+                  <span>Error: {formData.error}</span>
+                </div>
+                <p className="mt-2 ml-7 text-xs">Please try again or contact support if the problem persists.</p>
               </div>
             )}
             
