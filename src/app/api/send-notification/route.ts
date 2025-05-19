@@ -5,12 +5,12 @@ const resend = new Resend(process.env.NEXT_PUBLIC_RESEND_API_KEY);
 
 export async function POST(req: NextRequest) {
   try {
-    const { email, platform, socialHandle } = await req.json();
+    const { email } = await req.json();
 
     // Simple validation
-    if (!email || !platform || !socialHandle) {
+    if (!email) {
       return NextResponse.json(
-        { error: 'Missing required fields' },
+        { error: 'Missing email' },
         { status: 400 }
       );
     }
@@ -18,12 +18,10 @@ export async function POST(req: NextRequest) {
     const data = await resend.emails.send({
       from: 'Collabr <onboarding@resend.dev>',
       to: process.env.NEXT_PUBLIC_NOTIFICATION_EMAIL || 'henry@collabr.xyz',
-      subject: 'New Community Host Application',
+      subject: 'New Waitlist Signup',
       html: `
-        <h2>New Community Host Application</h2>
+        <h2>New Waitlist Signup</h2>
         <p><strong>Email:</strong> ${email}</p>
-        <p><strong>Platform:</strong> ${platform}</p>
-        <p><strong>Social Handle:</strong> @${socialHandle}</p>
         <p>Time: ${new Date().toLocaleString()}</p>
       `,
     });
