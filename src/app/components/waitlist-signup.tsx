@@ -7,6 +7,7 @@ import { InstagramIcon } from "./icons/instagram-icon"
 import { DiscordIcon } from "./icons/discord-icon"
 import { FacebookIcon } from "./icons/facebook-icon"
 import { LinkedInIcon } from "./icons/linkedin-icon"
+import { TelegramIcon } from "./icons/telegram-icon"
 import { Avatar } from "./avatar"
 import { SocialIcon } from "./social-icon"
 import { WaitlistForm } from "./waitlist-form"
@@ -41,6 +42,13 @@ export function WaitlistSignup() {
             <Link href="/communities" className="underline text-white hover:text-gray-200 transition-colors">
               Start exploring
             </Link>
+            {" · "}
+            <Link href="https://www.notion.so/collabr/Collabr-1f96bac1032d80e0bdafdf9cc878a0f8?pvs=4" 
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline text-white hover:text-gray-200 transition-colors">
+              Learn More
+            </Link>
           </p>
         </div>
         <div className="w-full">
@@ -70,13 +78,20 @@ export function WaitlistSignup() {
 
       <div className="pt-8 flex justify-center space-x-6">
         <SocialIcon
-          href="https://x.com"
+          href="https://x.com/collabrxyz"
           target="_blank"
           rel="noopener noreferrer"
           aria-label="X (formerly Twitter)"
           icon={<XIcon className="w-6 h-6" />}
         />
         <SocialIcon
+          href="https://t.me/wfyeung"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Telegram"
+          icon={<TelegramIcon className="w-6 h-6" />}
+        />
+        {/* <SocialIcon
           href="https://instagram.com"
           target="_blank"
           rel="noopener noreferrer"
@@ -103,7 +118,7 @@ export function WaitlistSignup() {
           rel="noopener noreferrer"
           aria-label="LinkedIn"
           icon={<LinkedInIcon className="w-6 h-6" />}
-        />
+        /> */}
       </div>
     </div>
   )

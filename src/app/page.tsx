@@ -33,32 +33,32 @@ export default function Home() {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [error, setError] = useState("");
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSubmitting(true);
-    setError("");
+  // const handleSubmit = async (e: React.FormEvent) => {
+  //   e.preventDefault();
+  //   setIsSubmitting(true);
+  //   setError("");
     
-    try {
-      // Simulate submission
-      await new Promise(resolve => setTimeout(resolve, 1000));
+  //   try {
+  //     // Simulate submission
+  //     await new Promise(resolve => setTimeout(resolve, 1000));
       
-      // Send notification email
-      await fetch('/api/send-notification', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email }),
-      });
+  //     // Send notification email
+  //     await fetch('/api/send-notification', {
+  //       method: 'POST',
+  //       headers: {
+  //         'Content-Type': 'application/json',
+  //       },
+  //       body: JSON.stringify({ email }),
+  //     });
       
-      setIsSubmitted(true);
-      setEmail("");
-    } catch (err) {
-      setError("Failed to submit. Please try again.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+  //     setIsSubmitted(true);
+  //     setEmail("");
+  //   } catch (err) {
+  //     setError("Failed to submit. Please try again.");
+  //   } finally {
+  //     setIsSubmitting(false);
+  //   }
+  // };
 
   return (
     // <main className="min-h-screen bg-black text-white flex flex-col items-center justify-center relative">
